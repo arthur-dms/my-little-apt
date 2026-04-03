@@ -25,10 +25,12 @@ The Discord bot serves as the **admin panel** for the C2 server. It accepts comm
 
 | Command | Arguments | Description |
 |---|---|---|
-| `!show-devices` | — | Lists all managed devices with their status |
-| `!set-beacon-interval` | `2` \| `8` \| `16` \| `32` | Sets the beacon interval (seconds) |
-| `!request-cookies` | — | Displays stored cookies from managed devices |
-| `!set-communication-protocol` | `http` \| `https` \| `dns` | Sets the communication protocol |
+| `/show-devices` | — | Lists all managed devices with their status |
+| `/set-beacon-interval` | `2` \| `8` \| `16` \| `32` (autocomplete) | Sets the beacon interval (seconds) |
+| `/request-cookies` | — | Displays stored cookies from managed devices |
+| `/set-communication-protocol` | `http` \| `https` \| `dns` (autocomplete) | Sets the communication protocol |
+
+> **Note:** Commands use Discord's native slash command system — type `/` in the chat to see all available commands with autocomplete.
 
 ### Quick Start
 
@@ -58,7 +60,7 @@ pytest tests/ -v --cov=. --cov-report=term-missing
 
 ## CI/CD
 
-Each service has its own GitHub Actions workflow. The **discord-bot** pipeline (`.github/workflows/ci.yml`) runs on every push/PR to `main`:
+All GitHub Actions workflows live in the repo root at `.github/workflows/`. The **discord-bot** pipeline (`.github/workflows/discord-bot-ci.yml`) runs on every push/PR to `main`:
 
 1. **Static Analysis** — `flake8` (PEP 8), `mypy` (type checking), `bandit` (security)
 2. **Tests & Coverage** — `pytest` with a minimum 80% coverage threshold
@@ -69,11 +71,11 @@ Each service has its own GitHub Actions workflow. The **discord-bot** pipeline (
 
 | File / Directory | Purpose |
 |---|---|
-| `discord-bot/bot.py` | Bot entry point, command registration, access control |
+| `discord-bot/bot.py` | Bot entry point, slash commands, access control, logging |
 | `discord-bot/config-example.py` | Configuration template (copy to `config.py`) |
 | `discord-bot/devices.py` | `DeviceManager` class — business logic |
-| `discord-bot/tests/` | Test suite (79 tests, ~99% coverage) |
-| `discord-bot/.github/workflows/` | CI/CD pipeline definitions |
+| `discord-bot/tests/` | Test suite (89 tests, ~97% coverage) |
+| `.github/workflows/` | CI/CD pipeline definitions |
 | `CLAUDE.md` | Internal project documentation for AI agents |
 
 ---
