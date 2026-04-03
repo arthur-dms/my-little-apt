@@ -32,23 +32,24 @@ discord-bot/
 ├── pyproject.toml       # Tool configuration (pytest, mypy, flake8)
 ├── requirements.txt     # Production dependencies
 ├── requirements-dev.txt # Dev/test dependencies
-└── tests/               # pytest test suite (79 tests, ~99% coverage)
+└── tests/               # pytest test suite (89 tests, ~97% coverage)
 ```
 
 ### Key Design Decisions
 
-- **Admin-only access**: commands are gated by `is_admin()` which checks `ctx.author.id == ADMIN_DISCORD_ID`.
+- **Admin-only access**: commands are gated by `is_admin_user()` which checks `interaction.user.id == ADMIN_DISCORD_ID`.
 - **Separation of concerns**: `DeviceManager` (in `devices.py`) holds all business logic; `bot.py` is a thin adapter layer.
-- **Command prefix**: `!` (configurable in `config.py`).
+- **Slash commands with autocomplete**: uses Discord's `app_commands` for native `/` command support with parameter suggestions.
+- **Terminal logging**: every command invocation and access denial is logged to stdout.
 
 ### Available Commands
 
 | Command | Arguments | Description |
 |---|---|---|
-| `!show-devices` | — | Lists all managed devices with status |
-| `!set-beacon-interval` | `2 \| 8 \| 16 \| 32` | Sets the beacon interval (seconds) |
-| `!request-cookies` | — | Displays stored cookies |
-| `!set-communication-protocol` | `http \| https \| dns` | Sets the communication protocol |
+| `/show-devices` | — | Lists all managed devices with status |
+| `/set-beacon-interval` | `2 \| 8 \| 16 \| 32` (autocomplete) | Sets the beacon interval (seconds) |
+| `/request-cookies` | — | Displays stored cookies |
+| `/set-communication-protocol` | `http \| https \| dns` (autocomplete) | Sets the communication protocol |
 
 ### Running Locally
 
