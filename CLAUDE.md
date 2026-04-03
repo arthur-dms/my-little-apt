@@ -32,8 +32,7 @@ discord-bot/
 ├── pyproject.toml       # Tool configuration (pytest, mypy, flake8)
 ├── requirements.txt     # Production dependencies
 ├── requirements-dev.txt # Dev/test dependencies
-├── tests/               # pytest test suite (79 tests, ~99% coverage)
-└── .github/workflows/   # CI/CD pipeline
+└── tests/               # pytest test suite (79 tests, ~99% coverage)
 ```
 
 ### Key Design Decisions
@@ -81,9 +80,9 @@ bandit -r . --exclude ./tests -ll
 
 ## CI/CD
 
-Each service has its own GitHub Actions workflow scoped to its directory.
+All GitHub Actions workflows live in the repo root at `.github/workflows/`. Each service has its own workflow file, scoped by `paths` filters.
 
-### discord-bot pipeline (`.github/workflows/ci.yml`)
+### discord-bot pipeline (`.github/workflows/discord-bot-ci.yml`)
 
 Triggers on `push` / `pull_request` to `main` when files in `discord-bot/` change.
 
