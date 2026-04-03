@@ -5,10 +5,12 @@ on:
     branches: [main]
     paths:
       - "discord-bot/**"
+      - ".github/workflows/discord-bot-ci.yml"
   pull_request:
     branches: [main]
     paths:
       - "discord-bot/**"
+      - ".github/workflows/discord-bot-ci.yml"
 
 defaults:
   run:
@@ -30,6 +32,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Create config from example
+        run: cp config-example.py config.py
 
       - name: Install dependencies
         run: |
@@ -61,6 +66,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Create config from example
+        run: cp config-example.py config.py
 
       - name: Install dependencies
         run: |
