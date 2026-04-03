@@ -5,12 +5,10 @@ on:
     branches: [main]
     paths:
       - "discord-bot/**"
-      - ".github/workflows/discord-bot-ci.yml"
   pull_request:
     branches: [main]
     paths:
       - "discord-bot/**"
-      - ".github/workflows/discord-bot-ci.yml"
 
 defaults:
   run:
