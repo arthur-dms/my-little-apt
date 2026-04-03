@@ -11,7 +11,7 @@ A monorepo for an educational Command and Control (C2) project. The system is co
 ```
 my-little-apt/
 ├── discord-bot/   → Discord-based admin panel (Python)
-├── server/        → C2 backend server (planned)
+├── server/        → C2 backend server (FastAPI + Redis)
 └── app/           → Client application (planned)
 ```
 
@@ -31,22 +31,39 @@ The Discord bot serves as the **admin panel** for the C2 server. It accepts comm
 | `/set-communication-protocol` | `http` \| `https` \| `dns` (autocomplete) | Sets the communication protocol |
 
 > **Note:** Commands use Discord's native slash command system — type `/` in the chat to see all available commands with autocomplete.
+> The bot sends commands to the C2 server via a **Redis message queue**. If the server is offline, the bot falls back to standalone/demo mode.
 
 ### Quick Start
 
-```bash
-cd discord-bot
+1. **Install system requirements**
+   You will need **Redis** installed and running on your system for message routing between the bot and the server.
+   ```bash
+   sudo apt update && sudo apt install redis-server -y
+   # Or using Docker: docker run -d -p 6379:6379 redis
+   ```
 
-# Install dependencies
-pip install -r requirements.txt
+2. **Start the Discord Bot**
+   ```bash
+   cd discord-bot
+   
+   # Install dependencies
+   pip install -r requirements.txt
+   
+   # Copy the example config and fill in your real credentials
+   cp config-example.py config.py
+   # Edit config.py → set DISCORD_BOT_TOKEN and ADMIN_DISCORD_ID
+   
+   # Run the bot
+   python bot.py
+   ```
 
-# Copy the example config and fill in your real credentials
-cp config-example.py config.py
-# Edit config.py → set DISCORD_BOT_TOKEN and ADMIN_DISCORD_ID
-
-# Run the bot
-python bot.py
-```
+3. **Start the C2 Server (New terminal)**
+   ```bash
+   cd server
+   pip install -r requirements.txt
+   cp config-example.py config.py
+   uvicorn server:app --reload
+   ```
 
 ### Running Tests
 

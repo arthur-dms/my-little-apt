@@ -50,7 +50,7 @@ class TestShowDevices:
 class TestSetBeaconInterval:
     """Tests for DeviceManager.set_beacon_interval()."""
 
-    @pytest.mark.parametrize("interval", [2, 8, 16, 32])
+    @pytest.mark.parametrize("interval", [2, 4, 8, 16, 32])
     def test_set_valid_beacon_interval(self, interval: int) -> None:
         manager = DeviceManager()
         result = manager.set_beacon_interval(interval)
@@ -58,7 +58,7 @@ class TestSetBeaconInterval:
         assert str(interval) in result
         assert manager.current_beacon_interval == interval
 
-    @pytest.mark.parametrize("interval", [0, 1, 3, 4, 5, 7, 9, 15, 17, 31, 33, 64, -1, 100])
+    @pytest.mark.parametrize("interval", [0, 1, 3, 5, 7, 9, 15, 17, 31, 33, 64, -1, 100])
     def test_set_invalid_beacon_interval(self, interval: int) -> None:
         manager = DeviceManager()
         original = manager.current_beacon_interval

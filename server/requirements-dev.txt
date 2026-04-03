@@ -1,0 +1,8 @@
+pytest
+pytest-asyncio
+pytest-cov
+httpx
+fakeredis
+flake8
+mypy
+bandit

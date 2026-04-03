@@ -7,7 +7,7 @@ This is a monorepo containing the services for the **My Little Apt** application
 | Directory | Description | Language |
 |---|---|---|
 | `discord-bot/` | Discord command-and-control bot | Python 3.12 |
-| `server/` | *(planned)* Backend API server | TBD |
+| `server/` | Backend API server + Redis Subscriber | Python 3.12 (FastAPI) |
 | `app/` | *(planned)* Frontend application | TBD |
 
 ---
@@ -38,7 +38,7 @@ discord-bot/
 ### Key Design Decisions
 
 - **Admin-only access**: commands are gated by `is_admin_user()` which checks `interaction.user.id == ADMIN_DISCORD_ID`.
-- **Separation of concerns**: `DeviceManager` (in `devices.py`) holds all business logic; `bot.py` is a thin adapter layer.
+- **Message Queue bridging**: The bot publishes commands to `c2:commands` Redis channel and listens for responses on `c2:responses`. It falls back to standalone logic if Redis is unavailable.
 - **Slash commands with autocomplete**: uses Discord's `app_commands` for native `/` command support with parameter suggestions.
 - **Terminal logging**: every command invocation and access denial is logged to stdout.
 
@@ -75,6 +75,31 @@ cd discord-bot
 flake8 bot.py config.py devices.py --max-line-length 100
 mypy bot.py config.py devices.py --ignore-missing-imports
 bandit -r . --exclude ./tests -ll
+```
+
+---
+
+## server (Backend API)
+
+The server acts as an intermediary, receiving commands from the Discord bot via Redis Pub/Sub (`c2:commands` / `c2:responses`) and serving them to the client app over HTTP.
+
+### Running Locally
+
+Ensure Redis is running (`sudo apt install redis-server` or `docker run -d -p 6379:6379 redis`).
+
+```bash
+cd server
+pip install -r requirements.txt
+cp config-example.py config.py
+uvicorn server:app --reload
+```
+
+### Testing
+
+```bash
+cd server
+pip install -r requirements-dev.txt
+pytest tests/ -v --cov=. --cov-report=term-missing
 ```
 
 ---
