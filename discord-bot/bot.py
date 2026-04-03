@@ -5,7 +5,6 @@ and logs every command invocation to the terminal for tracking.
 """
 
 import logging
-from datetime import datetime, timezone
 
 import discord
 from discord import app_commands
