@@ -4,14 +4,11 @@ All settings are hardcoded here for simplicity.
 """
 
 # ---------------------------------------------------------------------------
-# Redis connection settings (for server communication)
+# C2 Server connection
 # ---------------------------------------------------------------------------
 
-REDIS_HOST: str = "localhost"
-REDIS_PORT: int = 6379
-REDIS_DB: int = 0
-REDIS_CHANNEL_COMMANDS: str = "c2:commands"
-REDIS_CHANNEL_RESPONSES: str = "c2:responses"
+# URL of the C2 server. When both run on the same machine, use localhost.
+C2_SERVER_URL: str = "http://localhost:8000"
 
 # The Discord bot API token used to authenticate the bot with Discord.
 # Replace this with your actual bot token from the Discord Developer Portal.

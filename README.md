@@ -11,8 +11,14 @@ A monorepo for an educational Command and Control (C2) project. The system is co
 ```
 my-little-apt/
 ├── discord-bot/   → Discord-based admin panel (Python)
-├── server/        → C2 backend server (FastAPI + Redis)
+├── server/        → C2 backend server (FastAPI)
 └── app/           → Client application (planned)
+```
+
+The Discord bot communicates with the server via **direct HTTP calls**. If the server is offline, the bot falls back to standalone/demo mode.
+
+```
+Discord Bot  ──HTTP──▶  FastAPI Server  ──HTTP──▶  Client App (future)
 ```
 
 ---
@@ -31,43 +37,49 @@ The Discord bot serves as the **admin panel** for the C2 server. It accepts comm
 | `/set-communication-protocol` | `http` \| `https` \| `dns` (autocomplete) | Sets the communication protocol |
 
 > **Note:** Commands use Discord's native slash command system — type `/` in the chat to see all available commands with autocomplete.
-> The bot sends commands to the C2 server via a **Redis message queue**. If the server is offline, the bot falls back to standalone/demo mode.
+> The bot sends commands to the C2 server via **HTTP**. If the server is offline, the bot falls back to standalone/demo mode.
 
 ### Quick Start
 
-1. **Install system requirements**
-   You will need **Redis** installed and running on your system for message routing between the bot and the server.
+1. **Start the C2 Server**
    ```bash
-   sudo apt update && sudo apt install redis-server -y
-   # Or using Docker: docker run -d -p 6379:6379 redis
-   ```
+   cd server
 
-2. **Start the Discord Bot**
-   ```bash
-   cd discord-bot
-   
    # Install dependencies
    pip install -r requirements.txt
-   
+
+   # Copy the example config and adjust if needed
+   cp config-example.py config.py
+
+   # Run the server
+   uvicorn server:app --reload
+   # Or equivalently: python server.py
+   ```
+
+2. **Start the Discord Bot (New terminal)**
+   ```bash
+   cd discord-bot
+
+   # Install dependencies
+   pip install -r requirements.txt
+
    # Copy the example config and fill in your real credentials
    cp config-example.py config.py
    # Edit config.py → set DISCORD_BOT_TOKEN and ADMIN_DISCORD_ID
-   
+
    # Run the bot
    python bot.py
-   ```
-
-3. **Start the C2 Server (New terminal)**
-   ```bash
-   cd server
-   pip install -r requirements.txt
-   cp config-example.py config.py
-   uvicorn server:app --reload
    ```
 
 ### Running Tests
 
 ```bash
+# Server tests
+cd server
+pip install -r requirements-dev.txt
+pytest tests/ -v --cov=. --cov-report=term-missing
+
+# Bot tests
 cd discord-bot
 pip install -r requirements-dev.txt
 pytest tests/ -v --cov=. --cov-report=term-missing
@@ -88,10 +100,14 @@ All GitHub Actions workflows live in the repo root at `.github/workflows/`. The 
 
 | File / Directory | Purpose |
 |---|---|
-| `discord-bot/bot.py` | Bot entry point, slash commands, access control, logging |
+| `discord-bot/bot.py` | Bot entry point, slash commands, access control, HTTP bridge |
 | `discord-bot/config-example.py` | Configuration template (copy to `config.py`) |
-| `discord-bot/devices.py` | `DeviceManager` class — business logic |
-| `discord-bot/tests/` | Test suite (89 tests, ~97% coverage) |
+| `discord-bot/devices.py` | `DeviceManager` class — standalone/fallback logic |
+| `discord-bot/tests/` | Test suite (~100 tests, ~96% coverage) |
+| `server/server.py` | FastAPI server with admin and beacon endpoints |
+| `server/command_handler.py` | Server-side state management |
+| `server/models.py` | Pydantic data models |
+| `server/tests/` | Test suite (46 tests, ~99% coverage) |
 | `.github/workflows/` | CI/CD pipeline definitions |
 | `CLAUDE.md` | Internal project documentation for AI agents |
 

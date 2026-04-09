@@ -9,84 +9,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from models import (
     BeaconCheckIn,
-    CommandMessage,
-    CommandType,
     DeviceInfo,
-    ResponseMessage,
-    ResponseStatus,
     ServerConfig,
     TaskResponse,
     TaskResult,
 )
-
-
-# ---------------------------------------------------------------------------
-# CommandMessage
-# ---------------------------------------------------------------------------
-
-class TestCommandMessage:
-    """Tests for the CommandMessage model."""
-
-    def test_create_with_defaults(self) -> None:
-        msg = CommandMessage(command=CommandType.SHOW_DEVICES)
-        assert msg.command == CommandType.SHOW_DEVICES
-        assert msg.args == {}
-        assert msg.request_id  # auto-generated UUID
-        assert msg.timestamp  # auto-generated
-
-    def test_create_with_args(self) -> None:
-        msg = CommandMessage(
-            command=CommandType.SET_BEACON_INTERVAL,
-            args={"interval": 8},
-        )
-        assert msg.args == {"interval": 8}
-
-    def test_create_with_explicit_request_id(self) -> None:
-        msg = CommandMessage(
-            request_id="custom-id",
-            command=CommandType.REQUEST_COOKIES,
-        )
-        assert msg.request_id == "custom-id"
-
-    def test_invalid_command_raises(self) -> None:
-        with pytest.raises(ValueError):
-            CommandMessage(command="not-a-command")
-
-    def test_serialise_round_trip(self) -> None:
-        msg = CommandMessage(command=CommandType.SHOW_DEVICES)
-        data = msg.model_dump(mode="json")
-        restored = CommandMessage(**data)
-        assert restored.command == msg.command
-        assert restored.request_id == msg.request_id
-
-
-# ---------------------------------------------------------------------------
-# ResponseMessage
-# ---------------------------------------------------------------------------
-
-class TestResponseMessage:
-    """Tests for the ResponseMessage model."""
-
-    def test_success_response(self) -> None:
-        resp = ResponseMessage(
-            request_id="abc",
-            command=CommandType.SHOW_DEVICES,
-            status=ResponseStatus.SUCCESS,
-            message="OK",
-        )
-        assert resp.status == ResponseStatus.SUCCESS
-        assert resp.data == {}
-
-    def test_error_response_with_data(self) -> None:
-        resp = ResponseMessage(
-            request_id="xyz",
-            command=CommandType.REQUEST_COOKIES,
-            status=ResponseStatus.ERROR,
-            data={"detail": "something broke"},
-            message="failure",
-        )
-        assert resp.status == ResponseStatus.ERROR
-        assert resp.data["detail"] == "something broke"
 
 
 # ---------------------------------------------------------------------------

