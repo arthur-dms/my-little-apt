@@ -1,18 +1,18 @@
-name: CI — Discord bot Lint, Static Analysis & Tests
+name: CI — server — Lint, Static Analysis & Tests
 
 on:
   push:
     branches: [main]
     paths:
-      - "discord-bot/**"
+      - "server/**"
   pull_request:
     branches: [main]
     paths:
-      - "discord-bot/**"
+      - "server/**"
 
 defaults:
   run:
-    working-directory: discord-bot
+    working-directory: server
 
 jobs:
   # -----------------------------------------------------------------------
@@ -40,10 +40,10 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Run flake8 (PEP 8 style check)
-        run: flake8 bot.py config.py devices.py --max-line-length 100
+        run: flake8 server.py config.py command_handler.py models.py --max-line-length 100
 
       - name: Run mypy (static type analysis)
-        run: mypy bot.py config.py devices.py --ignore-missing-imports
+        run: mypy server.py config.py command_handler.py models.py --ignore-missing-imports
 
       - name: Run bandit (security analysis)
         run: bandit -r . --exclude ./tests -ll
@@ -71,6 +71,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
       - name: Run tests with coverage

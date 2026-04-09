@@ -2,6 +2,7 @@
 
 from config import (
     ADMIN_DISCORD_ID,
+    C2_SERVER_URL,
     COMMAND_PREFIX,
     DISCORD_BOT_TOKEN,
     VALID_BEACON_INTERVALS,
@@ -30,11 +31,17 @@ class TestConfigConstants:
     def test_command_prefix_is_not_empty(self) -> None:
         assert len(COMMAND_PREFIX) > 0
 
+    def test_server_url_is_string(self) -> None:
+        assert isinstance(C2_SERVER_URL, str)
+
+    def test_server_url_starts_with_http(self) -> None:
+        assert C2_SERVER_URL.startswith("http")
+
     def test_valid_beacon_intervals_is_list(self) -> None:
         assert isinstance(VALID_BEACON_INTERVALS, list)
 
     def test_valid_beacon_intervals_contains_expected_values(self) -> None:
-        assert VALID_BEACON_INTERVALS == [2, 8, 16, 32]
+        assert VALID_BEACON_INTERVALS == [2, 4, 8, 16, 32]
 
     def test_valid_beacon_intervals_all_integers(self) -> None:
         assert all(isinstance(v, int) for v in VALID_BEACON_INTERVALS)

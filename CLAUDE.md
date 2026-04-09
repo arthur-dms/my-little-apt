@@ -7,8 +7,8 @@ This is a monorepo containing the services for the **My Little Apt** application
 | Directory | Description | Language |
 |---|---|---|
 | `discord-bot/` | Discord command-and-control bot | Python 3.12 |
-| `server/` | *(planned)* Backend API server | TBD |
-| `app/` | *(planned)* Frontend application | TBD |
+| `server/` | Backend API server (FastAPI) | Python 3.12 |
+| `app/` | *(planned)* Client application | TBD |
 
 ---
 
@@ -20,25 +20,40 @@ This is a monorepo containing the services for the **My Little Apt** application
 
 ---
 
+## Communication Architecture
+
+The Discord bot communicates with the C2 server via **direct HTTP calls** (using `httpx`). If the server is unreachable, the bot falls back to standalone/demo mode using the local `DeviceManager`.
+
+```
+Discord Bot  ──HTTP──▶  FastAPI Server  ──HTTP──▶  Client App (future)
+     │                       │
+     │ GET /admin/devices    │ POST /beacon/check-in
+     │ GET /admin/cookies    │ GET  /beacon/tasks/{name}
+     │ POST /admin/...       │ POST /beacon/result
+     ▼                       ▼
+```
+
+---
+
 ## discord-bot
 
 ### Architecture
 
 ```
 discord-bot/
-├── bot.py               # Entry point — registers commands, enforces admin-only access
-├── config.py            # Hardcoded config: bot token, admin ID, valid parameter values
-├── devices.py           # DeviceManager class — business logic for all commands
+├── bot.py               # Entry point — registers commands, HTTP bridge to server
+├── config.py            # Hardcoded config: bot token, admin ID, server URL
+├── devices.py           # DeviceManager class — fallback/standalone logic
 ├── pyproject.toml       # Tool configuration (pytest, mypy, flake8)
-├── requirements.txt     # Production dependencies
+├── requirements.txt     # Production dependencies (discord.py, httpx)
 ├── requirements-dev.txt # Dev/test dependencies
-└── tests/               # pytest test suite (89 tests, ~97% coverage)
+└── tests/               # pytest test suite (~100 tests, ~96% coverage)
 ```
 
 ### Key Design Decisions
 
 - **Admin-only access**: commands are gated by `is_admin_user()` which checks `interaction.user.id == ADMIN_DISCORD_ID`.
-- **Separation of concerns**: `DeviceManager` (in `devices.py`) holds all business logic; `bot.py` is a thin adapter layer.
+- **HTTP bridge**: The bot calls the server's `/admin/*` endpoints via `httpx`. Falls back to standalone logic if the server is unreachable.
 - **Slash commands with autocomplete**: uses Discord's `app_commands` for native `/` command support with parameter suggestions.
 - **Terminal logging**: every command invocation and access denial is logged to stdout.
 
@@ -56,7 +71,7 @@ discord-bot/
 ```bash
 cd discord-bot
 pip install -r requirements.txt
-# Edit config.py → set DISCORD_BOT_TOKEN and ADMIN_DISCORD_ID
+# Edit config.py → set DISCORD_BOT_TOKEN, ADMIN_DISCORD_ID, and C2_SERVER_URL
 python bot.py
 ```
 
@@ -79,6 +94,44 @@ bandit -r . --exclude ./tests -ll
 
 ---
 
+## server (Backend API)
+
+The server acts as an intermediary, receiving commands from the Discord bot via HTTP (`/admin/*` endpoints) and serving tasks to the client app over HTTP (`/beacon/*` endpoints).
+
+### API Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/health` | Health check |
+| `GET` | `/admin/devices` | List managed devices |
+| `GET` | `/admin/cookies` | Retrieve cookies from all devices |
+| `POST` | `/admin/beacon-interval` | Set beacon interval |
+| `POST` | `/admin/communication-protocol` | Set communication protocol |
+| `POST` | `/beacon/check-in` | Beacon registers/updates presence |
+| `GET` | `/beacon/tasks/{name}` | Beacon polls for pending tasks |
+| `POST` | `/beacon/result` | Beacon submits task result |
+| `GET` | `/beacon/config` | Get current server config |
+
+### Running Locally
+
+```bash
+cd server
+pip install -r requirements.txt
+cp config-example.py config.py
+uvicorn server:app --reload
+# Or equivalently: python server.py
+```
+
+### Testing
+
+```bash
+cd server
+pip install -r requirements-dev.txt
+pytest tests/ -v --cov=. --cov-report=term-missing
+```
+
+---
+
 ## CI/CD
 
 All GitHub Actions workflows live in the repo root at `.github/workflows/`. Each service has its own workflow file, scoped by `paths` filters.
@@ -89,6 +142,24 @@ Triggers on `push` / `pull_request` to `main` when files in `discord-bot/` chang
 
 1. **Lint & Static Analysis** — `flake8` (PEP 8), `mypy` (type checking), `bandit` (security)
 2. **Tests & Coverage** — `pytest` with 80% minimum coverage threshold
+3. **Dependency Audit** — `pip-audit` (supply chain CVE scanning)
+
+### server pipeline (`.github/workflows/server-ci.yml`)
+
+Triggers on `push` / `pull_request` to `main` when files in `server/` change.
+
+1. **Lint & Static Analysis** — `flake8` (PEP 8), `mypy` (type checking), `bandit` (security)
+2. **Tests & Coverage** — `pytest` with 80% minimum coverage threshold
+3. **Dependency Audit** — `pip-audit` (supply chain CVE scanning)
+
+### Linting & Static Analysis (server)
+
+```bash
+cd server
+flake8 server.py config.py command_handler.py models.py --max-line-length 100
+mypy server.py config.py command_handler.py models.py --ignore-missing-imports
+bandit -r . --exclude ./tests -ll
+```
 
 ---
 
@@ -97,3 +168,4 @@ Triggers on `push` / `pull_request` to `main` when files in `discord-bot/` chang
 - **Python**: PEP 8, enforced by `flake8` (max line length 100). Type hints on all public functions; checked by `mypy`.
 - **Commits**: use conventional commits (`feat:`, `fix:`, `docs:`, `test:`, `ci:`).
 - **Tests**: pytest with `pytest-asyncio`. Every new feature must include tests to maintain ≥80% coverage.
+

