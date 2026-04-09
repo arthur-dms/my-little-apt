@@ -1,4 +1,4 @@
-name: CI — Server Lint, Static Analysis & Tests
+name: CI — server — Lint, Static Analysis & Tests
 
 on:
   push:

@@ -142,6 +142,24 @@ Triggers on `push` / `pull_request` to `main` when files in `discord-bot/` chang
 
 1. **Lint & Static Analysis** — `flake8` (PEP 8), `mypy` (type checking), `bandit` (security)
 2. **Tests & Coverage** — `pytest` with 80% minimum coverage threshold
+3. **Dependency Audit** — `pip-audit` (supply chain CVE scanning)
+
+### server pipeline (`.github/workflows/server-ci.yml`)
+
+Triggers on `push` / `pull_request` to `main` when files in `server/` change.
+
+1. **Lint & Static Analysis** — `flake8` (PEP 8), `mypy` (type checking), `bandit` (security)
+2. **Tests & Coverage** — `pytest` with 80% minimum coverage threshold
+3. **Dependency Audit** — `pip-audit` (supply chain CVE scanning)
+
+### Linting & Static Analysis (server)
+
+```bash
+cd server
+flake8 server.py config.py command_handler.py models.py --max-line-length 100
+mypy server.py config.py command_handler.py models.py --ignore-missing-imports
+bandit -r . --exclude ./tests -ll
+```
 
 ---
 
@@ -150,3 +168,4 @@ Triggers on `push` / `pull_request` to `main` when files in `discord-bot/` chang
 - **Python**: PEP 8, enforced by `flake8` (max line length 100). Type hints on all public functions; checked by `mypy`.
 - **Commits**: use conventional commits (`feat:`, `fix:`, `docs:`, `test:`, `ci:`).
 - **Tests**: pytest with `pytest-asyncio`. Every new feature must include tests to maintain ≥80% coverage.
+

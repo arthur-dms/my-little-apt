@@ -89,10 +89,22 @@ pytest tests/ -v --cov=. --cov-report=term-missing
 
 ## CI/CD
 
-All GitHub Actions workflows live in the repo root at `.github/workflows/`. The **discord-bot** pipeline (`.github/workflows/discord-bot-ci.yml`) runs on every push/PR to `main`:
+All GitHub Actions workflows live in `.github/workflows/`. Each service has its own pipeline, scoped by `paths` filters — only triggered when files in the respective directory change.
 
-1. **Static Analysis** — `flake8` (PEP 8), `mypy` (type checking), `bandit` (security)
-2. **Tests & Coverage** — `pytest` with a minimum 80% coverage threshold
+### Pipelines
+
+| Pipeline | File | Trigger |
+|---|---|---|
+| **discord-bot** | `discord-bot-ci.yml` | `push`/`pull_request` to `main` when `discord-bot/**` changes |
+| **server** | `server-ci.yml` | `push`/`pull_request` to `main` when `server/**` changes |
+
+### Jobs (identical for both pipelines)
+
+| Job | Tools | Purpose |
+|---|---|---|
+| **Lint & Static Analysis** | `flake8`, `mypy`, `bandit` | PEP 8 style, type checking, security vulnerabilities in code |
+| **Tests & Coverage** | `pytest`, `pytest-cov` | Unit tests with 80% minimum coverage threshold |
+| **Dependency Audit** | `pip-audit` | Check dependencies for known CVEs (supply chain security) |
 
 ---
 

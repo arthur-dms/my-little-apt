@@ -1,4 +1,4 @@
-name: CI — Lint, Static Analysis & Tests
+name: CI — Discord bot Lint, Static Analysis & Tests
 
 on:
   push:
