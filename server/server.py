@@ -16,7 +16,6 @@ from config import SERVER_HOST, SERVER_PORT, VALID_BEACON_INTERVALS
 from models import (
     BeaconCheckIn,
     DeviceInfo,
-    TaskResponse,
     TaskResult,
 )
 

@@ -8,7 +8,7 @@ Copy this file to config.py and adjust values as needed.
 # HTTP server settings
 # ---------------------------------------------------------------------------
 
-SERVER_HOST: str = "0.0.0.0"
+SERVER_HOST: str = "0.0.0.0"  # nosec B104 — intentional: server must accept external connections
 SERVER_PORT: int = 8000
 
 # ---------------------------------------------------------------------------
