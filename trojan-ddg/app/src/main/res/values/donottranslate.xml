@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+  ~ Copyright (c) 2022 DuckDuckGo
+  ~
+  ~ Licensed under the Apache License, Version 2.0 (the "License");
+  ~ you may not use this file except in compliance with the License.
+  ~ You may obtain a copy of the License at
+  ~
+  ~     http://www.apache.org/licenses/LICENSE-2.0
+  ~
+  ~ Unless required by applicable law or agreed to in writing, software
+  ~ distributed under the License is distributed on an "AS IS" BASIS,
+  ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  ~ See the License for the specific language governing permissions and
+  ~ limitations under the License.
+  -->
+
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- We won't have a translation for this, to be used later. -->
+    <string name="trackersOverviewEmpty">No tracking requests were blocked from loading on this page. If a company\'s requests are loaded, it can allow them to profile you.</string>
+
+    <!-- Sasquatch -->
+    <string name="webViewErrorTitle">DuckDuckGo can\'t load this page</string>
+    <string name="webViewErrorNoConnection">The internet connection appears to be offline.</string>
+    <string name="webViewErrorBadUrl">A server with the specified hostname could not be found.</string>
+    <string name="webViewErrorSslProtocol"><![CDATA[The certificate for this server is invalid. You might be connecting to a server that is pretending to be <b>%1$s</b> which could put your confidential information at risk.]]></string>
+
+    <!-- Broken Sites-->
+    <string name="brokenSitesLoginHint">What site are you signing in to? (required)</string>
+    <string name="brokenSitesLoginSmallHint">Site name (required)</string>
+
+    <!-- Content capture for upload -->
+    <string name="audioCaptureSoundRecorderUnavailable">Could not access sound recorder</string>
+    <string name="audioCaptureSoundRecorderPermissionDeniedTitle">Allow DuckDuckGo to ask for sound recorder access on this device</string>
+    <string name="audioCaptureSoundRecorderPermissionDeniedMessage">Sites can only use the sound recorder if you allow DuckDuckGo to ask for access.</string>
+
+    <!-- Force Dark Mode -->
+    <string name="appearanceNightModeTitle">Force Websites To Use Dark Theme</string>
+    <string name="appearanceNightModeSecondary">Supported sites will use a darker theme when the app is in dark mode</string>
+    <string name="appearanceNightModeDialogTitle">Relaunch app?</string>
+    <string name="appearanceNightModeDialogMessage">This will take effect for new tabs or after relaunching DuckDuckGo.</string>
+    <string name="appearanceNightModeDialogPrimaryCTA">Relaunch Now</string>
+    <string name="appearanceNightModeDialogSecondaryCTA">Dismiss</string>
+
+    <!-- New Tab -->
+    <string name="newTabPageShortcutDownloads">Downloads</string>
+    <string name="newTabPageShortcutSettings">Settings</string>
+
+    <!-- Indonesia message -->
+    <string name="newTabPageIndonesiaMessageHeading">DuckDuckGo Blocked in Indonesia</string>
+    <string name="newTabPageIndonesiaMessageBody">The government may be blocking access to duckduckgo.com on this network provider, which could affect this app\'s functionality. Other providers may not be affected.</string>
+    <string name="newTabPageIndonesiaMessageCta">Okay</string>
+
+    <!-- Skip Onboarding (not user-facing) -->
+    <string name="skipOnboarding">Skip Onboarding</string>"
+
+    <!-- Pre-onboarding Address Bar Position -->
+    <string name="preOnboardingAddressBarPositionTop">Top</string>
+    <string name="preOnboardingAddressBarPositionBottom">Bottom</string>
+    <string name="preOnboardingAddressBarPositionSplit">Split</string>
+
+    <!-- Browser tab -->
+    <string name="browserDuckPlayerShortUrl">Duck Player</string>
+
+    <!-- DuckChat -->
+    <string name="duckChatMenuItem">@string/duck_chat_title</string>
+
+    <!-- Duck.ai header tier -->
+    <string name="duckAiHeaderFreePlan">Free Plan</string>
+    <string name="duckAiHeaderUpgrade">Upgrade</string>
+    <string name="duckAiHeaderPaidTitle">Duck.ai</string>
+
+    <!-- ADS -->
+    <string name="ads_demo_activity_title" translatable="false">Android Design System Demo</string>
+
+    <!-- Digital Asset Links -->
+    <string name="asset_statements">
+      [{
+        \"relation\": [\"delegate_permission/common.handle_all_urls\"],
+        \"target\": {
+          \"namespace\": \"web\",
+          \"site\": \"https://duckduckgo.com\"
+        }
+      }]
+    </string>
+
+    <!-- Sync Restore (onboarding) -->
+    <string name="syncRestoreDialogTitle">Let\'s pick up where you left off</string>
+    <string name="syncRestoreDialogDescription">Want to restore your bookmarks, passwords, and more from your previous DuckDuckGo sync?</string>
+    <string name="syncRestoreDialogPrimaryCta">Restore My Stuff</string>
+    <string name="syncRestoreDialogSecondaryCta">Skip</string>
+
+    <!-- Inactivity timeout -->
+    <string name="afterInactivityOptionTitle">After Inactivity</string>
+    <string name="afterInactivityTimeoutRowTitle">Choose an inactivity timer</string>
+    <string name="afterInactivityScreenSectionHeader">Choose what you see when you return after inactivity</string>
+    <string name="afterInactivityOptionMessage" translatable="false">Choose what you see when you return after %1$s minutes of inactivity.</string>
+    <string name="afterInactivityTimeoutAlways" translatable="false">Always</string>
+    <string name="afterInactivityTimeout1Minute" translatable="false">1 minute</string>
+    <string name="afterInactivityTimeoutXMinutes" translatable="false">%1$d minutes</string>
+    <string name="afterInactivityTimeout1Hour" translatable="false">1 hour</string>
+    <string name="afterInactivityTimeoutXHours" translatable="false">%1$d hours</string>
+
+    <!--Onboarding Rebrand Design Update-->
+    <string name="preOnboardingWelcomeDialogTitle">Hi there!</string>
+    <string name="preOnboardingWelcomeDialogBody">Ready for a faster browser that protects you and lets you decide when and how to use AI?</string>
+    <string name="onboardingStepIndicatorText" tools:ignore="MissingInstruction">%1$d of %2$d</string>
+
+</resources>

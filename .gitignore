@@ -53,3 +53,14 @@ Thumbs.db
 # Misc
 # =============================================
 *.log
+
+# =============================================
+# Android / Gradle (trojan-ddg)
+# =============================================
+*.apk
+*.ap_
+*.dex
+*.class
+local.properties
+.gradle/
+.externalNativeBuild/
