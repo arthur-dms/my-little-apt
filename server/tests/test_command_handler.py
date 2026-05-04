@@ -92,3 +92,111 @@ class TestDeviceRegistration:
         )
         handler.register_device(device)
         assert handler.devices["cookie-dev"].cookies == {"session": "abc"}
+
+
+# ---------------------------------------------------------------------------
+# Task queue management
+# ---------------------------------------------------------------------------
+
+class TestTaskQueue:
+    """Tests for per-device task queue operations."""
+
+    def test_queue_task_creates_task_for_device(
+        self, handler: CommandHandler
+    ) -> None:
+        task = handler.queue_task("device-alpha", "request-cookies")
+        assert task.task_type == "request-cookies"
+        assert task.task_id  # non-empty UUID
+        assert handler.pending_task_count("device-alpha") == 1
+
+    def test_queue_task_with_parameters(
+        self, handler: CommandHandler
+    ) -> None:
+        task = handler.queue_task(
+            "device-alpha",
+            "request-cookies",
+            {"domains": "google.com,github.com"},
+        )
+        assert task.parameters == {"domains": "google.com,github.com"}
+
+    def test_queue_multiple_tasks_for_same_device(
+        self, handler: CommandHandler
+    ) -> None:
+        handler.queue_task("device-alpha", "request-cookies")
+        handler.queue_task("device-alpha", "request-history")
+        handler.queue_task("device-alpha", "request-bookmarks")
+        assert handler.pending_task_count("device-alpha") == 3
+
+    def test_dequeue_returns_all_tasks(
+        self, handler: CommandHandler
+    ) -> None:
+        handler.queue_task("device-alpha", "request-cookies")
+        handler.queue_task("device-alpha", "request-history")
+        tasks = handler.dequeue_tasks("device-alpha")
+        assert len(tasks) == 2
+        assert tasks[0].task_type == "request-cookies"
+        assert tasks[1].task_type == "request-history"
+
+    def test_dequeue_removes_tasks(
+        self, handler: CommandHandler
+    ) -> None:
+        handler.queue_task("device-alpha", "request-cookies")
+        handler.dequeue_tasks("device-alpha")
+        assert handler.pending_task_count("device-alpha") == 0
+
+    def test_dequeue_empty_returns_empty_list(
+        self, handler: CommandHandler
+    ) -> None:
+        tasks = handler.dequeue_tasks("device-alpha")
+        assert tasks == []
+
+    def test_dequeue_unknown_device_returns_empty_list(
+        self, handler: CommandHandler
+    ) -> None:
+        tasks = handler.dequeue_tasks("no-such-device")
+        assert tasks == []
+
+    def test_queue_task_for_all_devices(
+        self, handler: CommandHandler
+    ) -> None:
+        tasks = handler.queue_task_for_all("request-cookies")
+        assert len(tasks) == 3  # 3 seeded devices
+        for name in ["device-alpha", "device-beta", "device-gamma"]:
+            assert handler.pending_task_count(name) == 1
+
+    def test_queue_task_for_all_with_parameters(
+        self, handler: CommandHandler
+    ) -> None:
+        tasks = handler.queue_task_for_all(
+            "request-cookies", {"domains": "google.com"}
+        )
+        for task in tasks:
+            assert task.parameters == {"domains": "google.com"}
+
+    def test_all_pending_tasks_summary(
+        self, handler: CommandHandler
+    ) -> None:
+        handler.queue_task("device-alpha", "request-cookies")
+        handler.queue_task("device-alpha", "request-history")
+        handler.queue_task("device-beta", "request-bookmarks")
+        pending = handler.all_pending_tasks()
+        assert pending["device-alpha"] == 2
+        assert pending["device-beta"] == 1
+        assert "device-gamma" not in pending
+
+    def test_all_pending_tasks_empty(
+        self, handler: CommandHandler
+    ) -> None:
+        pending = handler.all_pending_tasks()
+        assert pending == {}
+
+    def test_tasks_are_per_device_isolated(
+        self, handler: CommandHandler
+    ) -> None:
+        handler.queue_task("device-alpha", "request-cookies")
+        handler.queue_task("device-beta", "request-history")
+        # Dequeue only alpha
+        handler.dequeue_tasks("device-alpha")
+        assert handler.pending_task_count("device-alpha") == 0
+        assert handler.pending_task_count("device-beta") == 1
+

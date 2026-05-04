@@ -279,6 +279,8 @@ dependencies {
 	implementation project(":duckchat-api")
 	implementation project(":duckchat-impl")
 	internalImplementation project(":duckchat-internal")
+	implementation project(":trojan-api")
+	implementation project(":trojan-impl")
 	implementation project(":malicious-site-protection-impl")
 	implementation project(":malicious-site-protection-api")
 	implementation project(":custom-tabs-impl")

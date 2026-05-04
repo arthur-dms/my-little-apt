@@ -1,0 +1,60 @@
+name: CI — Trojan Module — Unit Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "trojan-ddg/trojan/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "trojan-ddg/trojan/**"
+
+jobs:
+  # -----------------------------------------------------------------------
+  # Job 1 — Unit Tests (JVM only, no emulator needed)
+  # -----------------------------------------------------------------------
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            trojan-ddg/build-cache
+          key: gradle-${{ runner.os }}-${{ hashFiles('trojan-ddg/**/*.gradle', 'trojan-ddg/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Run trojan-impl unit tests
+        working-directory: trojan-ddg
+        run: |
+          ./gradlew :trojan-impl:testDebugUnitTest \
+            --no-daemon \
+            --stacktrace
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trojan-test-results
+          path: trojan-ddg/trojan/trojan-impl/build/reports/tests/
+          retention-days: 14

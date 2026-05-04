@@ -19,6 +19,7 @@ from server import app, handler
 def reset_handler():
     """Reset the server handler state before each test."""
     handler.devices.clear()
+    handler.task_queues.clear()
     handler._seed_sample_devices()
     handler.server_config.beacon_interval = 2
     handler.server_config.communication_protocol = "https"
@@ -352,3 +353,140 @@ class TestBeaconConfig:
         assert "communication_protocol" in data
         assert "valid_intervals" in data
         assert 4 in data["valid_intervals"]
+
+
+# ---------------------------------------------------------------------------
+# Admin task queue endpoints
+# ---------------------------------------------------------------------------
+
+class TestAdminQueueTask:
+    """Tests for POST /admin/queue-task."""
+
+    @pytest.mark.asyncio
+    async def test_queue_task_for_device(self, client: AsyncClient) -> None:
+        resp = await client.post("/admin/queue-task", json={
+            "device_name": "device-alpha",
+            "task_type": "request-cookies",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "success"
+        assert data["data"]["device"] == "device-alpha"
+        assert data["data"]["task_type"] == "request-cookies"
+        assert "task_id" in data["data"]
+
+    @pytest.mark.asyncio
+    async def test_queue_task_with_parameters(
+        self, client: AsyncClient
+    ) -> None:
+        resp = await client.post("/admin/queue-task", json={
+            "device_name": "device-alpha",
+            "task_type": "request-cookies",
+            "parameters": {"domains": "google.com"},
+        })
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_queue_task_for_unknown_device_returns_404(
+        self, client: AsyncClient
+    ) -> None:
+        resp = await client.post("/admin/queue-task", json={
+            "device_name": "ghost-device",
+            "task_type": "request-cookies",
+        })
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_queue_task_for_all_devices(
+        self, client: AsyncClient
+    ) -> None:
+        resp = await client.post("/admin/queue-task", json={
+            "device_name": "*",
+            "task_type": "request-cookies",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["data"]["device_count"] == 3
+        assert data["data"]["tasks_queued"] == 3
+
+    @pytest.mark.asyncio
+    async def test_queued_task_appears_in_beacon_tasks(
+        self, client: AsyncClient
+    ) -> None:
+        # Queue a task
+        await client.post("/admin/queue-task", json={
+            "device_name": "device-alpha",
+            "task_type": "request-cookies",
+            "parameters": {"domains": "github.com"},
+        })
+        # Beacon polls for tasks
+        resp = await client.get("/beacon/tasks/device-alpha")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["tasks"]) == 1
+        assert data["tasks"][0]["task_type"] == "request-cookies"
+        assert data["tasks"][0]["parameters"] == {"domains": "github.com"}
+
+    @pytest.mark.asyncio
+    async def test_tasks_are_dequeued_after_poll(
+        self, client: AsyncClient
+    ) -> None:
+        # Queue a task
+        await client.post("/admin/queue-task", json={
+            "device_name": "device-alpha",
+            "task_type": "request-cookies",
+        })
+        # First poll — gets the task
+        resp1 = await client.get("/beacon/tasks/device-alpha")
+        assert len(resp1.json()["tasks"]) == 1
+        # Second poll — queue is empty
+        resp2 = await client.get("/beacon/tasks/device-alpha")
+        assert len(resp2.json()["tasks"]) == 0
+
+    @pytest.mark.asyncio
+    async def test_tasks_do_not_leak_between_devices(
+        self, client: AsyncClient
+    ) -> None:
+        await client.post("/admin/queue-task", json={
+            "device_name": "device-alpha",
+            "task_type": "request-cookies",
+        })
+        # Beta should have no tasks
+        resp = await client.get("/beacon/tasks/device-beta")
+        assert resp.json()["tasks"] == []
+
+
+class TestAdminPendingTasks:
+    """Tests for GET /admin/pending-tasks."""
+
+    @pytest.mark.asyncio
+    async def test_no_pending_tasks(self, client: AsyncClient) -> None:
+        resp = await client.get("/admin/pending-tasks")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["data"]["pending_by_device"] == {}
+        assert "0 task(s)" in data["message"]
+
+    @pytest.mark.asyncio
+    async def test_shows_pending_per_device(
+        self, client: AsyncClient
+    ) -> None:
+        await client.post("/admin/queue-task", json={
+            "device_name": "device-alpha",
+            "task_type": "request-cookies",
+        })
+        await client.post("/admin/queue-task", json={
+            "device_name": "device-alpha",
+            "task_type": "request-history",
+        })
+        await client.post("/admin/queue-task", json={
+            "device_name": "device-beta",
+            "task_type": "request-bookmarks",
+        })
+        resp = await client.get("/admin/pending-tasks")
+        data = resp.json()
+        pending = data["data"]["pending_by_device"]
+        assert pending["device-alpha"] == 2
+        assert pending["device-beta"] == 1
+        assert "3 task(s)" in data["message"]
+

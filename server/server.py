@@ -61,6 +61,13 @@ class SetProtocolRequest(BaseModel):
     protocol: str
 
 
+class QueueTaskRequest(BaseModel):
+    """Payload for queuing a task to a device."""
+    device_name: str  # use "*" for all devices
+    task_type: str
+    parameters: dict = {}
+
+
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
@@ -193,7 +200,8 @@ async def beacon_check_in(payload: BeaconCheckIn) -> dict:
 async def beacon_get_tasks(device_name: str) -> dict:
     """
     Beacon polls for pending tasks.
-    Returns any tasks queued for the requesting device.
+    Dequeues and returns any tasks queued for the requesting device.
+    Tasks are removed from the queue once returned (fire-once).
     """
     device = handler.get_device(device_name)
     if device is None:
@@ -206,9 +214,12 @@ async def beacon_get_tasks(device_name: str) -> dict:
     # Update last_seen timestamp on poll.
     device.last_seen = datetime.now(timezone.utc)
 
+    # Dequeue all pending tasks for this device.
+    tasks = handler.dequeue_tasks(device_name)
+
     return {
         "device": device_name,
-        "tasks": [],
+        "tasks": [t.model_dump() for t in tasks],
         "beacon_interval": handler.server_config.beacon_interval,
     }
 
@@ -239,6 +250,59 @@ async def beacon_get_config() -> dict:
         "beacon_interval": handler.server_config.beacon_interval,
         "communication_protocol": handler.server_config.communication_protocol,
         "valid_intervals": VALID_BEACON_INTERVALS,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Admin task queue endpoint
+# ---------------------------------------------------------------------------
+
+@app.post("/admin/queue-task", tags=["admin"])
+async def admin_queue_task(body: QueueTaskRequest) -> dict:
+    """
+    Queue a task for a device (or all devices if device_name is '*').
+    The task will be picked up on the device's next /beacon/tasks poll.
+    """
+    if body.device_name == "*":
+        tasks = handler.queue_task_for_all(body.task_type, body.parameters)
+        return {
+            "status": "success",
+            "data": {
+                "tasks_queued": len(tasks),
+                "device_count": len(tasks),
+            },
+            "message": f"Queued '{body.task_type}' for {len(tasks)} device(s)",
+        }
+
+    # Validate device exists.
+    device = handler.get_device(body.device_name)
+    if device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Device '{body.device_name}' is not registered.",
+        )
+
+    task = handler.queue_task(body.device_name, body.task_type, body.parameters)
+    return {
+        "status": "success",
+        "data": {
+            "task_id": task.task_id,
+            "device": body.device_name,
+            "task_type": body.task_type,
+        },
+        "message": f"Task '{body.task_type}' queued for {body.device_name}",
+    }
+
+
+@app.get("/admin/pending-tasks", tags=["admin"])
+async def admin_pending_tasks() -> dict:
+    """Return a summary of all pending tasks across all devices."""
+    pending = handler.all_pending_tasks()
+    total = sum(pending.values())
+    return {
+        "status": "success",
+        "data": {"pending_by_device": pending},
+        "message": f"{total} task(s) pending across {len(pending)} device(s)",
     }
 
 

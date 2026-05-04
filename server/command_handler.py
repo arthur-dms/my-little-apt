@@ -4,10 +4,12 @@ Manages server-side state: devices, configuration, and pending tasks.
 """
 
 import logging
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
-from models import DeviceInfo, ServerConfig
+from models import DeviceInfo, ServerConfig, TaskResponse
 
 logger = logging.getLogger("c2-server.handler")
 
@@ -18,7 +20,8 @@ class CommandHandler:
     def __init__(self) -> None:
         self.server_config = ServerConfig()
         self.devices: dict[str, DeviceInfo] = {}
-        self.pending_tasks: list[dict[str, Any]] = []
+        # Per-device task queues: device_name -> list of TaskResponse
+        self.task_queues: dict[str, list[TaskResponse]] = defaultdict(list)
 
         # Seed sample devices for demonstration.
         self._seed_sample_devices()
@@ -57,3 +60,65 @@ class CommandHandler:
     def get_device(self, name: str) -> DeviceInfo | None:
         """Look up a device by name."""
         return self.devices.get(name)
+
+    # -----------------------------------------------------------------------
+    # Task queue management
+    # -----------------------------------------------------------------------
+
+    def queue_task(
+        self,
+        device_name: str,
+        task_type: str,
+        parameters: dict[str, Any] | None = None,
+    ) -> TaskResponse:
+        """
+        Queue a task for a specific device.
+        The task will be returned the next time the device polls /beacon/tasks.
+        """
+        task = TaskResponse(
+            task_id=str(uuid4()),
+            task_type=task_type,
+            parameters=parameters or {},
+        )
+        self.task_queues[device_name].append(task)
+        logger.info(
+            "Task queued for %s: type=%s, id=%s",
+            device_name,
+            task_type,
+            task.task_id,
+        )
+        return task
+
+    def queue_task_for_all(
+        self,
+        task_type: str,
+        parameters: dict[str, Any] | None = None,
+    ) -> list[TaskResponse]:
+        """Queue a task for ALL registered devices."""
+        tasks = []
+        for device_name in self.devices:
+            task = self.queue_task(device_name, task_type, parameters)
+            tasks.append(task)
+        return tasks
+
+    def dequeue_tasks(self, device_name: str) -> list[TaskResponse]:
+        """
+        Retrieve and remove all pending tasks for a device.
+        This is called when the beacon polls /beacon/tasks/{device_name}.
+        """
+        tasks = self.task_queues.pop(device_name, [])
+        if tasks:
+            logger.info(
+                "Dequeued %d task(s) for %s",
+                len(tasks),
+                device_name,
+            )
+        return tasks
+
+    def pending_task_count(self, device_name: str) -> int:
+        """Return the number of pending tasks for a device."""
+        return len(self.task_queues.get(device_name, []))
+
+    def all_pending_tasks(self) -> dict[str, int]:
+        """Return a summary of pending tasks per device."""
+        return {name: len(tasks) for name, tasks in self.task_queues.items() if tasks}
