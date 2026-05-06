@@ -38,7 +38,7 @@ my-little-apt/
 │   ├── models.py             # Pydantic models (BeaconCheckIn, ServerConfig, TaskResponse, etc.)
 │   ├── config.py             # REAL config (gitignored)
 │   ├── config-example.py     # Template (includes AES_SECRET_KEY, DNS_LISTENER_PORT)
-│   ├── requirements.txt      # Runtime deps (fastapi, pycryptodome, dnslib, ...)
+│   ├── requirements.txt      # Runtime deps (fastapi, cryptography, dnslib, ...)
 │   ├── requirements-dev.txt  # Dev deps
 │   └── tests/
 │       ├── test_server.py         # 78 tests — API endpoint tests (incl. /admin/results)
@@ -360,3 +360,5 @@ Each component has its own GitHub Actions workflow triggered by `paths` filters:
 8. **DNS port requires root:** `DNS_LISTENER_PORT=53` requires `sudo` or `setcap cap_net_bind_service`. Use `5300` for local dev. The Android `C2_DNS_PORT` must match.
 9. **Server starts empty:** `CommandHandler.__init__` no longer seeds sample devices. `_seed_sample_devices()` exists only for test fixtures — call it explicitly where needed.
 10. **Protocol is exfiltration-only:** `communication_protocol` controls only `sendResult()`. Check-in and task polling always use HTTP regardless of the configured protocol.
+11. **Trojan CI — no submodules:** `trojan-ci.yml` uses `submodules: false`. The DDG upstream has a native C++ submodule (`bloom_cpp`) with no URL in `.gitmodules`. Recursive submodule checkout fails; since `:trojan-impl:testDebugUnitTest` is JVM-only, submodules are not needed.
+12. **AES library — use `cryptography`, not `pyCryptodome`:** `server/crypto.py` uses `pyca/cryptography` (package `cryptography`). Bandit B413 flags the `pyCryptodome` import path (`from Crypto.Cipher import AES`) even though pyCryptodome is maintained. Use `cryptography` to keep CI clean.

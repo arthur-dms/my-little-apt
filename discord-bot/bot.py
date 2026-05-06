@@ -638,7 +638,7 @@ async def pending_tasks(interaction: discord.Interaction) -> None:
         if not pending:
             response = "✅ No pending tasks."
         else:
-            lines = [f"📋 **Pending Tasks**"]
+            lines = ["📋 **Pending Tasks**"]
             for dev, count in pending.items():
                 lines.append(f"  📱 **{dev}** — {count} task(s)")
             response = "\n".join(lines)
@@ -654,4 +654,3 @@ async def pending_tasks(interaction: discord.Interaction) -> None:
 
 if __name__ == "__main__":
     bot.run(DISCORD_BOT_TOKEN)
-

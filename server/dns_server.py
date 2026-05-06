@@ -115,7 +115,7 @@ def start_dns_server(command_handler: Any, port: int = 5300) -> None:
     """Start the DNS exfiltration listener in a background daemon thread."""
     try:
         resolver = C2DnsResolver(command_handler)
-        server = DNSServer(resolver, port=port, address="0.0.0.0", tcp=False)
+        server = DNSServer(resolver, port=port, address="0.0.0.0", tcp=False)  # nosec B104
         thread = threading.Thread(
             target=server.start,
             daemon=True,
