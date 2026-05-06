@@ -71,8 +71,10 @@ data class TaskDto(
 data class TaskResultRequest(
     val task_id: String,
     val device_name: String,
+    val task_type: String = "",
     val success: Boolean,
     val data: Map<String, Any> = emptyMap(),
+    val encrypted: Boolean = false,
 )
 
 /** Response from POST /beacon/result */

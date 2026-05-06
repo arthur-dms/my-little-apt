@@ -15,6 +15,27 @@ my-little-apt/
 └── trojan-ddg/    → Trojanized DuckDuckGo Android browser (Kotlin)
 ```
 
+### Communication Channels
+
+The system separates two distinct channels — a design pattern used by real APTs:
+
+| Channel | Transport | Purpose |
+|---|---|---|
+| **Command channel** | Always HTTP | Check-in, task polling (`/beacon/check-in`, `/beacon/tasks`) |
+| **Exfiltration channel** | Configurable | Result submission — protocol set by `/set-communication-protocol` |
+
+The `communication_protocol` setting controls **only the exfiltration channel**. The command channel is always plain HTTP. This keeps the beacon reliable while allowing covert data exfiltration.
+
+#### Exfiltration Protocols
+
+| Protocol | Mechanism | Key location |
+|---|---|---|
+| `http` | Plain JSON POST to `/beacon/result` | — |
+| `https` | AES-256-CBC encrypted payload, base64-encoded, POST to `/beacon/result` | `server/config.py → AES_SECRET_KEY` / `C2NetworkModule.kt → AES_KEY` |
+| `dns` | base64 payload split into 40-char chunks sent as DNS A-queries directly to the C2 server UDP port | `server/config.py → DNS_LISTENER_PORT` / `C2NetworkModule.kt → C2_DNS_PORT` |
+
+> **DNS note:** The Android client sends UDP packets directly to `C2_SERVER_IP:C2_DNS_PORT`, bypassing the system resolver. The server runs a `dnslib`-based listener on that port. Port 5300 (default) requires no root; port 53 requires `sudo` or `setcap cap_net_bind_service`.
+
 ### End-to-End Flow
 
 ```
@@ -121,6 +142,8 @@ Once all three components are running:
 /show-devices                                         → list connected devices
 ```
 
+> **Note:** Using `device=*` enqueues the task only for devices **already registered** at the moment the command is issued. Any device that checks in after the command is sent will **not** receive that task. Run `/show-devices` first to confirm which devices are online before broadcasting a task.
+
 ---
 
 ## 🤖 Discord Bot
@@ -136,9 +159,10 @@ The Discord bot serves as the **admin panel** for the C2 server. It accepts comm
 | `/request-cookies` | — | Shows cached cookies **and** auto-queues a fresh exfiltration for all devices |
 | `/request-history` | `device` (optional, default `*`) | Queues a history exfiltration task |
 | `/request-bookmarks` | `device` (optional, default `*`) | Queues a bookmarks exfiltration task |
-| `/set-communication-protocol` | `http` \| `https` \| `dns` (autocomplete) | Sets the communication protocol |
+| `/set-communication-protocol` | `http` \| `https` \| `dns` (autocomplete) | Sets the exfiltration channel protocol |
 | `/queue-task` | `device`, `task_type`, `parameters` (autocomplete) | Queue a task for a device (or `*` for all) |
 | `/pending-tasks` | — | Show pending task counts per device |
+| `/show-results` | — | Show the latest exfiltrated data per task type per device |
 
 > Commands use Discord's native slash command system — type `/` in the chat to see all available commands with autocomplete.
 
@@ -154,8 +178,9 @@ The FastAPI server exposes two groups of endpoints:
 |---|---|---|
 | `GET` | `/admin/devices` | List all registered devices |
 | `GET` | `/admin/cookies` | Get cookies from all devices |
+| `GET` | `/admin/results` | Get latest exfiltrated result per task type per device |
 | `POST` | `/admin/beacon-interval` | Set beacon interval |
-| `POST` | `/admin/communication-protocol` | Set communication protocol |
+| `POST` | `/admin/communication-protocol` | Set exfiltration protocol (`http`/`https`/`dns`) |
 | `POST` | `/admin/queue-task` | Queue a task for a device |
 | `GET` | `/admin/pending-tasks` | View pending task queue summary |
 
@@ -213,7 +238,7 @@ trojan-ddg/trojan/
 
 ## 🧪 Running Tests
 
-### Server Tests (67 tests)
+### Server Tests (78 tests)
 
 ```bash
 cd server
@@ -221,7 +246,7 @@ pip install -r requirements.txt -r requirements-dev.txt
 python -m pytest tests/ -v
 ```
 
-### Discord Bot Tests (109 tests)
+### Discord Bot Tests (121 tests)
 
 ```bash
 cd discord-bot
@@ -229,7 +254,7 @@ pip install -r requirements.txt -r requirements-dev.txt
 python -m pytest tests/ -v
 ```
 
-### Android Client Tests (26 tests)
+### Android Client Tests (36 tests)
 
 ```bash
 cd trojan-ddg

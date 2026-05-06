@@ -28,6 +28,7 @@ from bot import (  # noqa: E402
     format_server_devices,
     format_server_cookies,
     format_server_simple,
+    format_server_results,
     beacon_interval_autocomplete,
     protocol_autocomplete,
 )
@@ -42,6 +43,7 @@ request_cookies = bot_module.request_cookies.callback  # type: ignore[union-attr
 set_communication_protocol = bot_module.set_communication_protocol.callback  # type: ignore[union-attr]
 request_history = bot_module.request_history.callback  # type: ignore[union-attr]
 request_bookmarks = bot_module.request_bookmarks.callback  # type: ignore[union-attr]
+show_results = bot_module.show_results.callback  # type: ignore[union-attr]
 
 
 # ---------------------------------------------------------------------------
@@ -555,3 +557,145 @@ class TestProtocolAutocomplete:
         # 'DNS'.lower() = 'dns', should match 'dns'
         values = [c.value for c in choices]
         assert "dns" in values
+
+
+# ---------------------------------------------------------------------------
+# format_server_results
+# ---------------------------------------------------------------------------
+
+class TestFormatServerResults:
+    """Tests for format_server_results()."""
+
+    def _make_results_response(self, device: str = "POCO_F5", task_type: str = "request-cookies") -> dict:
+        return {
+            "status": "success",
+            "message": "2 result(s) across 1 device(s)",
+            "data": {
+                "results_by_device": {
+                    device: {
+                        task_type: {
+                            "task_id": "abc-123",
+                            "data": {"output": "google.com: session=xyz"},
+                            "success": True,
+                            "received_at": "2025-01-15T10:30:45Z",
+                        }
+                    }
+                }
+            },
+        }
+
+    def test_no_results_returns_empty_message(self) -> None:
+        data = {"status": "success", "message": "0 result(s)", "data": {"results_by_device": {}}}
+        result = format_server_results(data)
+        assert "No task results" in result
+
+    def test_contains_device_name(self) -> None:
+        result = format_server_results(self._make_results_response("POCO_F5"))
+        assert "POCO_F5" in result
+
+    def test_contains_task_type(self) -> None:
+        result = format_server_results(self._make_results_response())
+        assert "request-cookies" in result
+
+    def test_contains_success_emoji(self) -> None:
+        result = format_server_results(self._make_results_response())
+        assert "✅" in result
+
+    def test_contains_cookie_emoji_for_cookies(self) -> None:
+        result = format_server_results(self._make_results_response(task_type="request-cookies"))
+        assert "🍪" in result
+
+    def test_contains_history_emoji_for_history(self) -> None:
+        result = format_server_results(self._make_results_response(task_type="request-history"))
+        assert "📜" in result
+
+    def test_contains_output_data(self) -> None:
+        result = format_server_results(self._make_results_response())
+        assert "google.com" in result
+
+    def test_truncates_long_response(self) -> None:
+        big_output = "\n".join([f"line {i}" for i in range(200)])
+        data = {
+            "status": "success",
+            "message": "1 result(s) across 1 device(s)",
+            "data": {
+                "results_by_device": {
+                    "device": {
+                        "request-history": {
+                            "task_id": "x",
+                            "data": {"output": big_output},
+                            "success": True,
+                            "received_at": "2025-01-15T10:00:00Z",
+                        }
+                    }
+                }
+            },
+        }
+        result = format_server_results(data)
+        assert len(result) <= 2000
+
+
+# ---------------------------------------------------------------------------
+# /show-results command
+# ---------------------------------------------------------------------------
+
+class TestShowResults:
+    """Tests for the /show-results slash command."""
+
+    @pytest.mark.asyncio
+    async def test_access_denied_for_non_admin(self) -> None:
+        interaction = _make_interaction(author_id=999)
+        await show_results(interaction)
+        interaction.response.send_message.assert_called_once()
+        args = interaction.response.send_message.call_args
+        assert "Access denied" in args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_server_response_formatted(self) -> None:
+        interaction = _make_interaction()
+        server_data = {
+            "status": "success",
+            "message": "1 result(s) across 1 device(s)",
+            "data": {
+                "results_by_device": {
+                    "POCO_F5": {
+                        "request-cookies": {
+                            "task_id": "t-1",
+                            "data": {"output": "google.com: s=abc"},
+                            "success": True,
+                            "received_at": "2025-01-15T10:00:00Z",
+                        }
+                    }
+                }
+            },
+        }
+        with patch("bot.call_server", new_callable=AsyncMock) as mock_server:
+            mock_server.return_value = server_data
+            await show_results(interaction)
+        interaction.response.send_message.assert_called_once()
+        response_text = interaction.response.send_message.call_args[0][0]
+        assert "POCO_F5" in response_text
+        assert "request-cookies" in response_text
+
+    @pytest.mark.asyncio
+    async def test_server_unreachable_shows_error(self) -> None:
+        interaction = _make_interaction()
+        with patch("bot.call_server", new_callable=AsyncMock) as mock_server:
+            mock_server.return_value = None
+            await show_results(interaction)
+        response_text = interaction.response.send_message.call_args[0][0]
+        assert "❌" in response_text
+
+    @pytest.mark.asyncio
+    async def test_no_results_shows_empty_message(self) -> None:
+        interaction = _make_interaction()
+        empty_data = {
+            "status": "success",
+            "message": "0 result(s) across 0 device(s)",
+            "data": {"results_by_device": {}},
+        }
+        with patch("bot.call_server", new_callable=AsyncMock) as mock_server:
+            mock_server.return_value = empty_data
+            await show_results(interaction)
+        response_text = interaction.response.send_message.call_args[0][0]
+        assert "No task results" in response_text

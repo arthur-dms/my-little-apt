@@ -39,20 +39,21 @@ class BeaconWorker(
 
     override suspend fun doWork(): Result {
         return try {
-            // Check in + poll for tasks
             val checkInResult = beaconService.checkIn()
 
-            // Execute each pending task and report results
             checkInResult.commands.forEach { cmd ->
                 val result = commandHandler.execute(cmd)
-                beaconService.sendResult(cmd.id, result)
+                beaconService.sendResult(
+                    commandId = cmd.id,
+                    commandType = cmd.type,
+                    result = result,
+                    protocol = checkInResult.communicationProtocol,
+                )
             }
-            
-            // Schedule the next check-in
+
             scheduleNext(checkInResult.beaconInterval)
             Result.success()
         } catch (e: Exception) {
-            // WorkManager will retry with exponential backoff
             Result.retry()
         }
     }

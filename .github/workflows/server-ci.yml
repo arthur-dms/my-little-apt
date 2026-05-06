@@ -2,7 +2,7 @@ name: CI — server — Lint, Static Analysis & Tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'feat/**', 'fix/**']
     paths:
       - "server/**"
   pull_request:

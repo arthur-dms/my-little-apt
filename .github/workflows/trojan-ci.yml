@@ -2,7 +2,7 @@ name: CI — Trojan Module — Unit Tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'feat/**', 'fix/**']
     paths:
       - "trojan-ddg/trojan/**"
   pull_request:

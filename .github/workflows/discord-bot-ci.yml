@@ -2,7 +2,7 @@ name: CI — Discord bot Lint, Static Analysis & Tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'feat/**', 'fix/**']
     paths:
       - "discord-bot/**"
   pull_request:

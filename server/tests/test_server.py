@@ -20,9 +20,10 @@ def reset_handler():
     """Reset the server handler state before each test."""
     handler.devices.clear()
     handler.task_queues.clear()
+    handler.task_registry.clear()
     handler._seed_sample_devices()
-    handler.server_config.beacon_interval = 2
-    handler.server_config.communication_protocol = "https"
+    handler.server_config.beacon_interval = 15
+    handler.server_config.communication_protocol = "http"
 
 
 @pytest.fixture
@@ -326,6 +327,28 @@ class TestBeaconResult:
         assert resp.json()["status"] == "accepted"
 
     @pytest.mark.asyncio
+    async def test_submit_result_stores_on_device(
+        self, client: AsyncClient
+    ) -> None:
+        # Queue a task so the registry knows the task_type.
+        queue_resp = await client.post("/admin/queue-task", json={
+            "device_name": "device-alpha",
+            "task_type": "request-cookies",
+        })
+        task_id = queue_resp.json()["data"]["task_id"]
+
+        resp = await client.post("/beacon/result", json={
+            "task_id": task_id,
+            "device_name": "device-alpha",
+            "task_type": "request-cookies",
+            "success": True,
+            "data": {"output": "google.com: session=abc"},
+        })
+        assert resp.status_code == 200
+        device = handler.get_device("device-alpha")
+        assert "request-cookies" in device.results  # type: ignore[union-attr]
+
+    @pytest.mark.asyncio
     async def test_submit_result_unknown_device(
         self, client: AsyncClient
     ) -> None:
@@ -490,3 +513,51 @@ class TestAdminPendingTasks:
         assert pending["device-beta"] == 1
         assert "3 task(s)" in data["message"]
 
+
+# ---------------------------------------------------------------------------
+# Admin results endpoint
+# ---------------------------------------------------------------------------
+
+class TestAdminResults:
+    """Tests for GET /admin/results."""
+
+    @pytest.mark.asyncio
+    async def test_no_results_returns_empty(self, client: AsyncClient) -> None:
+        resp = await client.get("/admin/results")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "success"
+        assert data["data"]["results_by_device"] == {}
+        assert "0 result(s)" in data["message"]
+
+    @pytest.mark.asyncio
+    async def test_returns_stored_results(self, client: AsyncClient) -> None:
+        # Queue and submit a result
+        queue_resp = await client.post("/admin/queue-task", json={
+            "device_name": "device-alpha",
+            "task_type": "request-history",
+        })
+        task_id = queue_resp.json()["data"]["task_id"]
+        await client.post("/beacon/result", json={
+            "task_id": task_id,
+            "device_name": "device-alpha",
+            "task_type": "request-history",
+            "success": True,
+            "data": {"output": "https://github.com"},
+        })
+
+        resp = await client.get("/admin/results")
+        data = resp.json()
+        results = data["data"]["results_by_device"]
+        assert "device-alpha" in results
+        assert "request-history" in results["device-alpha"]
+        assert results["device-alpha"]["request-history"]["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_only_devices_with_results_are_listed(
+        self, client: AsyncClient
+    ) -> None:
+        resp = await client.get("/admin/results")
+        data = resp.json()
+        # device-beta and device-gamma have no results
+        assert "device-beta" not in data["data"]["results_by_device"]

