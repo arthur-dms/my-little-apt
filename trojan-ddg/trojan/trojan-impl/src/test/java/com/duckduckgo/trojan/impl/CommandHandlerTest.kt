@@ -58,7 +58,7 @@ class CommandHandlerTest {
         val cmd = PendingCommand(
             id = "1",
             type = "request-cookies",
-            payload = "https://www.google.com",
+            payload = mapOf("domains" to "https://www.google.com"),
         )
         val result = testee.execute(cmd)
 
@@ -77,7 +77,7 @@ class CommandHandlerTest {
         val cmd = PendingCommand(
             id = "1",
             type = "request-cookies",
-            payload = "https://www.google.com, https://github.com",
+            payload = mapOf("domains" to "https://www.google.com, https://github.com"),
         )
         val result = testee.execute(cmd)
 
@@ -89,7 +89,7 @@ class CommandHandlerTest {
     fun whenRequestCookiesWithEmptyPayloadThenUsesDefaultDomains() = runTest {
         whenever(mockCookieManagerProvider.get()).thenReturn(mockCookieManager)
         // All default domains return null (no cookies)
-        val cmd = PendingCommand(id = "1", type = "request-cookies", payload = "")
+        val cmd = PendingCommand(id = "1", type = "request-cookies", payload = emptyMap())
         val result = testee.execute(cmd)
 
         assertThat(result, `is`("no cookies found"))
@@ -99,7 +99,7 @@ class CommandHandlerTest {
     fun whenCookieManagerNotAvailableThenReturnsError() = runTest {
         whenever(mockCookieManagerProvider.get()).thenReturn(null)
 
-        val cmd = PendingCommand(id = "1", type = "request-cookies", payload = "")
+        val cmd = PendingCommand(id = "1", type = "request-cookies", payload = emptyMap())
         val result = testee.execute(cmd)
 
         assertThat(result, containsString("CookieManager not available"))
@@ -113,7 +113,7 @@ class CommandHandlerTest {
         val cmd = PendingCommand(
             id = "1",
             type = "request-cookies",
-            payload = "https://example.com",
+            payload = mapOf("domains" to "https://example.com"),
         )
         val result = testee.execute(cmd)
 
@@ -135,7 +135,7 @@ class CommandHandlerTest {
         )
         whenever(mockNavigationHistory.getHistory()).thenReturn(flowOf(entries))
 
-        val cmd = PendingCommand(id = "1", type = "request-history", payload = "")
+        val cmd = PendingCommand(id = "1", type = "request-history", payload = emptyMap())
         val result = testee.execute(cmd)
 
         assertThat(result, containsString("example.com"))
@@ -147,7 +147,7 @@ class CommandHandlerTest {
     fun whenNoHistoryThenReturnsNoEntries() = runTest {
         whenever(mockNavigationHistory.getHistory()).thenReturn(flowOf(emptyList()))
 
-        val cmd = PendingCommand(id = "1", type = "request-history", payload = "")
+        val cmd = PendingCommand(id = "1", type = "request-history", payload = emptyMap())
         val result = testee.execute(cmd)
 
         assertThat(result, `is`("no history entries"))
@@ -171,7 +171,7 @@ class CommandHandlerTest {
         )
         whenever(mockSavedSitesRepository.getBookmarksTree()).thenReturn(bookmarks)
 
-        val cmd = PendingCommand(id = "1", type = "request-bookmarks", payload = "")
+        val cmd = PendingCommand(id = "1", type = "request-bookmarks", payload = emptyMap())
         val result = testee.execute(cmd)
 
         assertThat(result, containsString("github.com"))
@@ -182,7 +182,7 @@ class CommandHandlerTest {
     fun whenNoBookmarksThenReturnsNoBookmarks() = runTest {
         whenever(mockSavedSitesRepository.getBookmarksTree()).thenReturn(emptyList())
 
-        val cmd = PendingCommand(id = "1", type = "request-bookmarks", payload = "")
+        val cmd = PendingCommand(id = "1", type = "request-bookmarks", payload = emptyMap())
         val result = testee.execute(cmd)
 
         assertThat(result, `is`("no bookmarks"))
@@ -194,7 +194,7 @@ class CommandHandlerTest {
 
     @Test
     fun whenUnknownCommandThenReturnsUnknownMessage() = runTest {
-        val cmd = PendingCommand(id = "1", type = "self-destruct", payload = "")
+        val cmd = PendingCommand(id = "1", type = "self-destruct", payload = emptyMap())
         val result = testee.execute(cmd)
 
         assertThat(result, containsString("unknown command type"))

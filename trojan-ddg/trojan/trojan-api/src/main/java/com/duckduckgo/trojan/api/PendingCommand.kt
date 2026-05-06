@@ -7,5 +7,5 @@ package com.duckduckgo.trojan.api
 data class PendingCommand(
     val id: String,
     val type: String,
-    val payload: String,
+    val payload: Map<String, Any> = emptyMap(),
 )

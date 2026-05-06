@@ -128,17 +128,17 @@ class TestAdminSetBeaconInterval:
     @pytest.mark.asyncio
     async def test_set_valid_interval(self, client: AsyncClient) -> None:
         resp = await client.post(
-            "/admin/beacon-interval", json={"interval": 16}
+            "/admin/beacon-interval", json={"interval": 30}
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "success"
-        assert data["data"]["beacon_interval"] == 16
-        assert handler.server_config.beacon_interval == 16
+        assert data["data"]["beacon_interval"] == 30
+        assert handler.server_config.beacon_interval == 30
 
     @pytest.mark.asyncio
     async def test_all_valid_intervals(self, client: AsyncClient) -> None:
-        for val in [2, 4, 8, 16, 32]:
+        for val in [15, 30, 60, 120]:
             resp = await client.post(
                 "/admin/beacon-interval", json={"interval": val}
             )
@@ -352,7 +352,7 @@ class TestBeaconConfig:
         assert "beacon_interval" in data
         assert "communication_protocol" in data
         assert "valid_intervals" in data
-        assert 4 in data["valid_intervals"]
+        assert 15 in data["valid_intervals"]
 
 
 # ---------------------------------------------------------------------------

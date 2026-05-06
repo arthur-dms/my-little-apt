@@ -22,7 +22,7 @@ ADMIN_DISCORD_ID: int = 123456789012345678
 COMMAND_PREFIX: str = "!"
 
 # Valid beacon interval values in seconds.
-VALID_BEACON_INTERVALS: list[int] = [2, 4, 8, 16, 32]
+VALID_BEACON_INTERVALS: list[int] = [15, 30, 60, 120]
 
 # Valid communication protocol options.
 VALID_COMMUNICATION_PROTOCOLS: list[str] = ["http", "https", "dns"]

@@ -50,7 +50,7 @@ class TestShowDevices:
 class TestSetBeaconInterval:
     """Tests for DeviceManager.set_beacon_interval()."""
 
-    @pytest.mark.parametrize("interval", [2, 4, 8, 16, 32])
+    @pytest.mark.parametrize("interval", [15, 30, 60, 120])
     def test_set_valid_beacon_interval(self, interval: int) -> None:
         manager = DeviceManager()
         result = manager.set_beacon_interval(interval)
@@ -58,7 +58,7 @@ class TestSetBeaconInterval:
         assert str(interval) in result
         assert manager.current_beacon_interval == interval
 
-    @pytest.mark.parametrize("interval", [0, 1, 3, 5, 7, 9, 15, 17, 31, 33, 64, -1, 100])
+    @pytest.mark.parametrize("interval", [0, 1, 2, 3, 5, 7, 9, 16, 17, 31, 33, 64, -1, 100])
     def test_set_invalid_beacon_interval(self, interval: int) -> None:
         manager = DeviceManager()
         original = manager.current_beacon_interval
@@ -69,18 +69,18 @@ class TestSetBeaconInterval:
 
     def test_set_beacon_interval_updates_state(self) -> None:
         manager = DeviceManager()
-        manager.set_beacon_interval(32)
-        assert manager.current_beacon_interval == 32
-        manager.set_beacon_interval(8)
-        assert manager.current_beacon_interval == 8
+        manager.set_beacon_interval(60)
+        assert manager.current_beacon_interval == 60
+        manager.set_beacon_interval(30)
+        assert manager.current_beacon_interval == 30
 
     def test_invalid_beacon_interval_error_lists_allowed_values(self) -> None:
         manager = DeviceManager()
         result = manager.set_beacon_interval(99)
-        assert "2" in result
-        assert "8" in result
-        assert "16" in result
-        assert "32" in result
+        assert "15" in result
+        assert "30" in result
+        assert "60" in result
+        assert "120" in result
 
 
 class TestRequestCookies:
@@ -167,7 +167,7 @@ class TestDeviceManagerInitialization:
 
     def test_default_beacon_interval(self) -> None:
         manager = DeviceManager()
-        assert manager.current_beacon_interval == 2
+        assert manager.current_beacon_interval == 15
 
     def test_default_communication_protocol(self) -> None:
         manager = DeviceManager()

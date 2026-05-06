@@ -41,7 +41,7 @@ class TestConfigConstants:
         assert isinstance(VALID_BEACON_INTERVALS, list)
 
     def test_valid_beacon_intervals_contains_expected_values(self) -> None:
-        assert VALID_BEACON_INTERVALS == [2, 4, 8, 16, 32]
+        assert VALID_BEACON_INTERVALS == [15, 30, 60, 120]
 
     def test_valid_beacon_intervals_all_integers(self) -> None:
         assert all(isinstance(v, int) for v in VALID_BEACON_INTERVALS)

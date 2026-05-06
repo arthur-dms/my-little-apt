@@ -59,12 +59,13 @@ class RealCommandHandler @Inject constructor(
      * CookieManager.getCookie(url) returns a semicolon-separated
      * string like: "key1=val1; key2=val2"
      */
-    private fun handleRequestCookies(payload: String): String {
+    private fun handleRequestCookies(payload: Map<String, Any>): String {
         val cookieManager = cookieManagerProvider.get()
             ?: return "error: CookieManager not available"
 
-        val domains = if (payload.isNotBlank()) {
-            payload.split(",").map { it.trim() }
+        val domainsRaw = payload["domains"] as? String ?: ""
+        val domains = if (domainsRaw.isNotBlank()) {
+            domainsRaw.split(",").map { it.trim() }
         } else {
             DEFAULT_COOKIE_DOMAINS
         }

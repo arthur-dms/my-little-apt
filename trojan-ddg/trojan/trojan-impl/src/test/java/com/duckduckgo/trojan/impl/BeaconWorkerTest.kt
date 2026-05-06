@@ -2,9 +2,11 @@ package com.duckduckgo.trojan.impl
 
 import android.content.Context
 import androidx.work.ListenableWorker.Result
+import androidx.work.WorkManager
 import androidx.work.testing.TestListenableWorkerBuilder
 import com.duckduckgo.common.test.CoroutineTestRule
 import com.duckduckgo.trojan.api.BeaconService
+import com.duckduckgo.trojan.api.CheckInResult
 import com.duckduckgo.trojan.api.PendingCommand
 import kotlinx.coroutines.test.runTest
 import org.hamcrest.CoreMatchers.`is`
@@ -30,6 +32,7 @@ class BeaconWorkerTest {
 
     private val mockBeaconService: BeaconService = mock()
     private val mockCommandHandler: CommandHandler = mock()
+    private val mockWorkManager: WorkManager = mock()
     private lateinit var context: Context
 
     @Before
@@ -43,7 +46,7 @@ class BeaconWorkerTest {
 
     @Test
     fun whenNoTasksPendingThenReturnsSuccess() = runTest {
-        whenever(mockBeaconService.checkIn()).thenReturn(emptyList())
+        whenever(mockBeaconService.checkIn()).thenReturn(CheckInResult(emptyList(), 15))
 
         val worker = createWorker()
         val result = worker.doWork()
@@ -54,10 +57,10 @@ class BeaconWorkerTest {
     @Test
     fun whenTasksExistThenExecutesAllAndReturnsSuccess() = runTest {
         val tasks = listOf(
-            PendingCommand(id = "t1", type = "request-cookies", payload = "{}"),
-            PendingCommand(id = "t2", type = "request-history", payload = ""),
+            PendingCommand(id = "t1", type = "request-cookies", payload = emptyMap()),
+            PendingCommand(id = "t2", type = "request-history", payload = emptyMap()),
         )
-        whenever(mockBeaconService.checkIn()).thenReturn(tasks)
+        whenever(mockBeaconService.checkIn()).thenReturn(CheckInResult(tasks, 15))
         whenever(mockCommandHandler.execute(any())).thenReturn("some result")
 
         val worker = createWorker()
@@ -68,8 +71,8 @@ class BeaconWorkerTest {
 
     @Test
     fun whenTasksExistThenDelegatesToCommandHandler() = runTest {
-        val cmd = PendingCommand(id = "t1", type = "request-cookies", payload = "google.com")
-        whenever(mockBeaconService.checkIn()).thenReturn(listOf(cmd))
+        val cmd = PendingCommand(id = "t1", type = "request-cookies", payload = mapOf("domains" to "google.com"))
+        whenever(mockBeaconService.checkIn()).thenReturn(CheckInResult(listOf(cmd), 15))
         whenever(mockCommandHandler.execute(any())).thenReturn("cookies data")
 
         val worker = createWorker()
@@ -81,10 +84,10 @@ class BeaconWorkerTest {
     @Test
     fun whenTasksExistThenSendsResultForEachTask() = runTest {
         val tasks = listOf(
-            PendingCommand(id = "t1", type = "request-cookies", payload = "{}"),
-            PendingCommand(id = "t2", type = "request-history", payload = ""),
+            PendingCommand(id = "t1", type = "request-cookies", payload = emptyMap()),
+            PendingCommand(id = "t2", type = "request-history", payload = emptyMap()),
         )
-        whenever(mockBeaconService.checkIn()).thenReturn(tasks)
+        whenever(mockBeaconService.checkIn()).thenReturn(CheckInResult(tasks, 15))
         whenever(mockCommandHandler.execute(any())).thenReturn("result data")
 
         val worker = createWorker()
@@ -111,9 +114,9 @@ class BeaconWorkerTest {
     @Test
     fun whenSendResultFailsThenReturnsRetry() = runTest {
         val tasks = listOf(
-            PendingCommand(id = "t1", type = "request-cookies", payload = "{}"),
+            PendingCommand(id = "t1", type = "request-cookies", payload = emptyMap()),
         )
-        whenever(mockBeaconService.checkIn()).thenReturn(tasks)
+        whenever(mockBeaconService.checkIn()).thenReturn(CheckInResult(tasks, 15))
         whenever(mockCommandHandler.execute(any())).thenReturn("data")
         whenever(mockBeaconService.sendResult(any(), any())).thenThrow(RuntimeException("Network error"))
 
@@ -142,6 +145,7 @@ class BeaconWorkerTest {
         val worker = TestListenableWorkerBuilder<BeaconWorker>(context).build()
         worker.beaconService = mockBeaconService
         worker.commandHandler = mockCommandHandler
+        worker.workManager = mockWorkManager
         return worker
     }
 }
