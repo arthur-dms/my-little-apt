@@ -59,11 +59,13 @@ my-little-apt/
 │           │   ├── RealBeaconService.kt # check-in + poll + protocol-aware sendResult
 │           │   ├── AesExfiltrator.kt    # AES-256-CBC encryption for HTTPS channel
 │           │   ├── DnsExfiltrator.kt    # DNS tunneling exfiltration (raw DatagramSocket)
-│           │   ├── CommandHandler.kt    # Dispatches request-cookies/history/bookmarks
-│           │   └── BeaconWorker.kt      # OneTimeWorkRequest chain + BeaconInitializer
+│           │   ├── CommandHandler.kt    # Dispatches exfiltration commands
+│           │   ├── BeaconWorker.kt      # OneTimeWorkRequest chain + BeaconInitializer
+│           │   └── BeaconBootReceiver.kt # BroadcastReceiver — restarts beacon on BOOT_COMPLETED
 │           │
 │           └── src/test/java/com/duckduckgo/trojan/impl/
 │               ├── BeaconWorkerTest.kt       # 11 tests (Robolectric)
+│               ├── BeaconBootReceiverTest.kt # 3 tests (Robolectric + WorkManagerTestInitHelper)
 │               ├── CommandHandlerTest.kt     # 9 tests (Robolectric)
 │               ├── RealBeaconServiceTest.kt  # 14 tests (mockito)
 │               ├── AesExfiltratorTest.kt     # 5 tests — encryption correctness

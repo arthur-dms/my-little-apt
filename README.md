@@ -213,11 +213,14 @@ The client is a modified DuckDuckGo Android browser with an embedded C2 beacon m
 trojan-ddg/trojan/
 ├── trojan-api/          → Interface contract (BeaconService, PendingCommand)
 └── trojan-impl/         → Implementation
-    ├── C2ApiService.kt      → Retrofit interface aligned with server endpoints
-    ├── C2NetworkModule.kt   → @Named("c2") OkHttp/Retrofit (isolated from DDG)
-    ├── RealBeaconService.kt → Check-in + task polling logic
-    ├── CommandHandler.kt    → Dispatches: request-cookies/history/bookmarks
-    └── BeaconWorker.kt      → Self-rescheduling OneTimeWorkRequest (dynamic interval)
+    ├── C2ApiService.kt        → Retrofit interface aligned with server endpoints
+    ├── C2NetworkModule.kt     → @Named("c2") OkHttp/Retrofit (isolated from DDG)
+    ├── RealBeaconService.kt   → Check-in + task polling logic
+    ├── CommandHandler.kt      → Dispatches exfiltration commands
+    ├── BeaconWorker.kt        → Self-rescheduling OneTimeWorkRequest (dynamic interval)
+    ├── BeaconBootReceiver.kt  → BroadcastReceiver that restarts beacon after reboot
+    ├── AesExfiltrator.kt      → AES-256-CBC encryption for HTTPS channel
+    └── DnsExfiltrator.kt      → DNS tunneling exfiltration
 ```
 
 ### Supported Commands
@@ -231,11 +234,12 @@ trojan-ddg/trojan/
 ### How the Beacon Works
 
 1. `BeaconInitializer` schedules a `OneTimeWorkRequest` with a 15-second initial delay when the app starts
-2. `BeaconWorker` fires and calls `POST /beacon/check-in` to register the device
-3. Then `GET /beacon/tasks/{device_name}` to poll for commands
-4. For each command, `CommandHandler.execute()` gathers the data
-5. Results are sent back via `POST /beacon/result`
-6. The worker reads `beacon_interval` from the server response and schedules the **next** `OneTimeWorkRequest` with that interval (self-rescheduling chain)
+2. `BeaconBootReceiver` re-schedules the beacon (30-second delay) after every device reboot — no user interaction required
+3. `BeaconWorker` fires and calls `POST /beacon/check-in` to register the device
+4. Then `GET /beacon/tasks/{device_name}` to poll for commands
+5. For each command, `CommandHandler.execute()` gathers the data
+6. Results are sent back via `POST /beacon/result`
+7. The worker reads `beacon_interval` from the server response and schedules the **next** `OneTimeWorkRequest` with that interval (self-rescheduling chain)
 
 > **Dynamic intervals:** The admin can change the beacon interval at any time via `/set-beacon-interval`. The client picks up the new value on its next check-in. Valid values: `15`, `30`, `60`, `120` seconds.
 
