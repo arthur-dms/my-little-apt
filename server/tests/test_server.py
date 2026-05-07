@@ -81,6 +81,7 @@ class TestAdminShowDevices:
             assert "name" in d
             assert "ip" in d
             assert "status" in d
+            assert "is_emulator" in d
             assert "last_seen" in d
 
     @pytest.mark.asyncio
@@ -270,6 +271,29 @@ class TestBeaconCheckIn:
             "device_name": "no-ip",
         })
         assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_check_in_stores_is_emulator_flag(
+        self, client: AsyncClient
+    ) -> None:
+        await client.post("/beacon/check-in", json={
+            "device_name": "emu-dev",
+            "ip_address": "10.0.1.1",
+            "is_emulator": True,
+        })
+        device = handler.get_device("emu-dev")
+        assert device.is_emulator is True
+
+    @pytest.mark.asyncio
+    async def test_check_in_is_emulator_defaults_to_false(
+        self, client: AsyncClient
+    ) -> None:
+        await client.post("/beacon/check-in", json={
+            "device_name": "real-dev",
+            "ip_address": "10.0.1.2",
+        })
+        device = handler.get_device("real-dev")
+        assert device.is_emulator is False
 
 
 # ---------------------------------------------------------------------------

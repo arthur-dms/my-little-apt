@@ -100,8 +100,9 @@ def format_server_devices(data: dict[str, Any]) -> str:
     lines = [f"✅ **Server Response — {data.get('message', '')}**"]
     for d in devices:
         status_emoji = "🟢" if d["status"] == "online" else "🔴"
+        emulator_badge = " 🤖 *emulator*" if d.get("is_emulator") else ""
         lines.append(
-            f"{status_emoji} **{d['name']}** — "
+            f"{status_emoji} **{d['name']}**{emulator_badge} — "
             f"IP: `{d['ip']}` — Status: {d['status']}"
         )
     return "\n".join(lines)

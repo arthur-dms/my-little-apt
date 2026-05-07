@@ -41,7 +41,7 @@ my-little-apt/
 │   ├── requirements.txt      # Runtime deps (fastapi, cryptography, dnslib, ...)
 │   ├── requirements-dev.txt  # Dev deps
 │   └── tests/
-│       ├── test_server.py         # 78 tests — API endpoint tests (incl. /admin/results)
+│       ├── test_server.py         # 80 tests — API endpoint tests (incl. /admin/results, is_emulator)
 │       ├── test_command_handler.py # 27 tests — state, task queue, result storage
 │       └── test_models.py         # model validation tests
 │
@@ -67,7 +67,7 @@ my-little-apt/
 │               ├── BeaconWorkerTest.kt       # 11 tests (Robolectric)
 │               ├── BeaconBootReceiverTest.kt # 3 tests (Robolectric + WorkManagerTestInitHelper)
 │               ├── CommandHandlerTest.kt     # 9 tests (Robolectric)
-│               ├── RealBeaconServiceTest.kt  # 14 tests (mockito)
+│               ├── RealBeaconServiceTest.kt  # 16 tests (mockito) — includes emulator detection
 │               ├── AesExfiltratorTest.kt     # 5 tests — encryption correctness
 │               └── DnsExfiltratorTest.kt     # 5 tests — chunking and QNAME format
 │
@@ -113,6 +113,7 @@ Understanding this cycle is critical. Every feature touches at least two modules
 - **Isolated networking:** The trojan's OkHttp/Retrofit stack is `@Named("c2")` — completely separated from DDG's own networking to prevent traffic leaks.
 - **API/impl split:** The trojan follows DDG's module pattern: `trojan-api` defines interfaces, `trojan-impl` provides Dagger-wired implementations. Other DDG modules only see `trojan-api`.
 - **Two-channel design:** Check-in and task polling always use HTTP (command channel). Only result submission uses the configurable protocol (exfiltration channel). This mirrors real APT behavior and keeps the beacon stable regardless of the chosen exfiltration method.
+- **Emulator detection:** The beacon detects whether it is running on an emulator (via `Build` constants — `FINGERPRINT`, `MODEL`, `MANUFACTURER`, `BRAND`, `DEVICE`, `PRODUCT`) and reports `is_emulator: Boolean` in every check-in. The server stores this on `DeviceInfo` and the bot `/show-devices` shows a 🤖 badge for emulators.
 
 ---
 
