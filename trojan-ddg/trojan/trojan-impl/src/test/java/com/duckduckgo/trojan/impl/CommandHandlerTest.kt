@@ -237,6 +237,51 @@ class CommandHandlerTest {
     }
 
     // -----------------------------------------------------------------------
+    // request-sms
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun whenRequestSmsWithEmptyInboxThenReturnsNoMessages() = runTest {
+        // Robolectric's ContentResolver returns null/empty for content://sms/inbox by default.
+        val cmd = PendingCommand(id = "1", type = "request-sms", payload = emptyMap())
+        val result = testee.execute(cmd)
+
+        assertThat(
+            result.contains("no message", ignoreCase = true) ||
+                result.contains("no sms", ignoreCase = true),
+            `is`(true),
+        )
+    }
+
+    @Test
+    fun whenRequestSmsPermissionDeniedThenReturnsPermissionError() = runTest {
+        val restrictedContext = object : android.content.ContextWrapper(context) {
+            override fun getContentResolver(): android.content.ContentResolver {
+                return object : android.test.mock.MockContentResolver() {
+                    override fun query(
+                        uri: Uri,
+                        projection: Array<out String>?,
+                        selection: String?,
+                        selectionArgs: Array<out String>?,
+                        sortOrder: String?,
+                    ) = throw SecurityException("READ_SMS denied")
+                }
+            }
+        }
+        val restrictedHandler = RealCommandHandler(
+            mockCookieManagerProvider,
+            mockNavigationHistory,
+            mockSavedSitesRepository,
+            restrictedContext,
+        )
+
+        val cmd = PendingCommand(id = "1", type = "request-sms", payload = emptyMap())
+        val result = restrictedHandler.execute(cmd)
+
+        assertThat(result, containsString("permission denied"))
+    }
+
+    // -----------------------------------------------------------------------
     // Unknown command
     // -----------------------------------------------------------------------
 

