@@ -41,7 +41,7 @@ my-little-apt/
 │   ├── requirements.txt      # Runtime deps (fastapi, cryptography, dnslib, ...)
 │   ├── requirements-dev.txt  # Dev deps
 │   └── tests/
-│       ├── test_server.py         # 80 tests — API endpoint tests (incl. /admin/results, is_emulator)
+│       ├── test_server.py         # 83 tests — API endpoint tests (incl. /admin/results, /admin/device-info)
 │       ├── test_command_handler.py # 27 tests — state, task queue, result storage
 │       └── test_models.py         # model validation tests
 │
@@ -57,6 +57,7 @@ my-little-apt/
 │           │   ├── C2ApiService.kt      # Retrofit interface matching server endpoints
 │           │   ├── C2NetworkModule.kt   # @Named("c2") OkHttp + Retrofit + shared constants
 │           │   ├── RealBeaconService.kt # check-in + poll + protocol-aware sendResult
+│           │   ├── DeviceFingerprinter.kt # Collects root/carrier/app-count for check-in
 │           │   ├── AesExfiltrator.kt    # AES-256-CBC encryption for HTTPS channel
 │           │   ├── DnsExfiltrator.kt    # DNS tunneling exfiltration (raw DatagramSocket)
 │           │   ├── CommandHandler.kt    # Dispatches exfiltration commands
@@ -67,7 +68,8 @@ my-little-apt/
 │               ├── BeaconWorkerTest.kt       # 11 tests (Robolectric)
 │               ├── BeaconBootReceiverTest.kt # 3 tests (Robolectric + WorkManagerTestInitHelper)
 │               ├── CommandHandlerTest.kt     # 9 tests (Robolectric)
-│               ├── RealBeaconServiceTest.kt  # 16 tests (mockito) — includes emulator detection
+│               ├── RealBeaconServiceTest.kt  # 16 tests (mockito) — emulator detection, fingerprint injection
+│               ├── DeviceFingerprintTest.kt  # 4 tests (Robolectric) — root/carrier/app-count logic
 │               ├── AesExfiltratorTest.kt     # 5 tests — encryption correctness
 │               └── DnsExfiltratorTest.kt     # 5 tests — chunking and QNAME format
 │

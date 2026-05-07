@@ -22,11 +22,16 @@ class RealBeaconServiceTest {
     val coroutineRule = CoroutineTestRule()
 
     private val mockApi: C2ApiService = mock()
+    private val mockFingerprinter: DeviceFingerprinter = mock()
     private lateinit var testee: RealBeaconService
 
     @Before
     fun setUp() {
-        testee = RealBeaconService(mockApi)
+        whenever(mockFingerprinter.androidVersion()).thenReturn("Android 14 (SDK 34)")
+        whenever(mockFingerprinter.isRooted()).thenReturn(false)
+        whenever(mockFingerprinter.installedAppCount()).thenReturn(42)
+        whenever(mockFingerprinter.carrier()).thenReturn("Test Carrier")
+        testee = RealBeaconService(mockApi, mockFingerprinter)
     }
 
     // -----------------------------------------------------------------------

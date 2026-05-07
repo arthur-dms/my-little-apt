@@ -21,6 +21,9 @@ class BeaconCheckIn(BaseModel):
     os_info: str = ""
     cookies: dict[str, str] = Field(default_factory=dict)
     is_emulator: bool = False
+    is_rooted: bool = False
+    installed_apps_count: int = 0
+    carrier: str = ""
 
 
 class DeviceInfo(BaseModel):
@@ -30,6 +33,9 @@ class DeviceInfo(BaseModel):
     status: str = "online"
     os_info: str = ""
     is_emulator: bool = False
+    is_rooted: bool = False
+    installed_apps_count: int = 0
+    carrier: str = ""
     last_seen: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )

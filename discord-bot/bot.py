@@ -100,10 +100,15 @@ def format_server_devices(data: dict[str, Any]) -> str:
     lines = [f"✅ **Server Response — {data.get('message', '')}**"]
     for d in devices:
         status_emoji = "🟢" if d["status"] == "online" else "🔴"
-        emulator_badge = " 🤖 *emulator*" if d.get("is_emulator") else ""
+        badges = ""
+        if d.get("is_emulator"):
+            badges += " 🤖"
+        if d.get("is_rooted"):
+            badges += " 🔓"
+        carrier = f" | {d['carrier']}" if d.get("carrier") else ""
         lines.append(
-            f"{status_emoji} **{d['name']}**{emulator_badge} — "
-            f"IP: `{d['ip']}` — Status: {d['status']}"
+            f"{status_emoji} **{d['name']}**{badges} — "
+            f"IP: `{d['ip']}`{carrier}"
         )
     return "\n".join(lines)
 
@@ -645,6 +650,45 @@ async def pending_tasks(interaction: discord.Interaction) -> None:
             response = "\n".join(lines)
     else:
         response = "❌ Server unreachable — cannot check pending tasks."
+
+    await interaction.response.send_message(response)
+
+
+@bot.tree.command(
+    name="device-info",
+    description="Show full fingerprint details for a specific device.",
+)
+@app_commands.describe(device="Device name (e.g. POCO_F5)")
+async def device_info(interaction: discord.Interaction, device: str) -> None:
+    """Display rich fingerprint data for the requested device."""
+    if not is_admin_user(interaction):
+        log_access_denied(interaction, "device-info")
+        await interaction.response.send_message(
+            "🚫 **Access denied.** You are not authorised to use this bot.",
+            ephemeral=True,
+        )
+        return
+
+    log_command(interaction, "device-info")
+
+    server_response = await call_server(f"/admin/device-info/{device}")
+    if server_response:
+        d = server_response.get("data", {})
+        status_emoji = "🟢" if d.get("status") == "online" else "🔴"
+        emulator_line = " 🤖 *emulator*" if d.get("is_emulator") else ""
+        rooted_line = " 🔓 *rooted*" if d.get("is_rooted") else ""
+        lines = [
+            f"📱 **Device: {d.get('name')}**{emulator_line}{rooted_line}",
+            f"  Status: {status_emoji} {d.get('status')}",
+            f"  IP: `{d.get('ip')}`",
+            f"  OS: `{d.get('os_info')}`",
+            f"  Carrier: `{d.get('carrier', 'unknown')}`",
+            f"  Installed apps: `{d.get('installed_apps_count', 0)}`",
+            f"  Last seen: `{d.get('last_seen')}`",
+        ]
+        response = "\n".join(lines)
+    else:
+        response = f"❌ Could not retrieve device info for `{device}`."
 
     await interaction.response.send_message(response)
 

