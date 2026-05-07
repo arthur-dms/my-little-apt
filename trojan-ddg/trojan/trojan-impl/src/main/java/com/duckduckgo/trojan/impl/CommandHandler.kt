@@ -159,7 +159,7 @@ class RealCommandHandler @Inject constructor(
             for (provider in providers) {
                 @Suppress("MissingPermission")
                 val loc = lm.getLastKnownLocation(provider) ?: continue
-                if (bestLocation == null || loc.accuracy < bestLocation!!.accuracy) {
+                if (bestLocation == null || loc.accuracy < bestLocation.accuracy) {
                     bestLocation = loc
                 }
             }

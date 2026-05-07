@@ -105,13 +105,13 @@ class RealBeaconService @Inject constructor(
     }
 
     internal fun detectEmulator(): Boolean =
-        Build.FINGERPRINT.startsWith("generic") ||
-            Build.FINGERPRINT.startsWith("unknown") ||
-            Build.MODEL.contains("google_sdk", ignoreCase = true) ||
-            Build.MODEL.contains("Emulator", ignoreCase = true) ||
-            Build.MODEL.contains("Android SDK built for x86", ignoreCase = true) ||
-            Build.MANUFACTURER.contains("Genymotion", ignoreCase = true) ||
-            (Build.BRAND.startsWith("generic") && Build.DEVICE.startsWith("generic")) ||
+        Build.FINGERPRINT.orEmpty().startsWith("generic") ||
+            Build.FINGERPRINT.orEmpty().startsWith("unknown") ||
+            Build.MODEL.orEmpty().contains("google_sdk", ignoreCase = true) ||
+            Build.MODEL.orEmpty().contains("Emulator", ignoreCase = true) ||
+            Build.MODEL.orEmpty().contains("Android SDK built for x86", ignoreCase = true) ||
+            Build.MANUFACTURER.orEmpty().contains("Genymotion", ignoreCase = true) ||
+            (Build.BRAND.orEmpty().startsWith("generic") && Build.DEVICE.orEmpty().startsWith("generic")) ||
             Build.PRODUCT == "google_sdk"
 
     @SuppressLint("HardwareIds")

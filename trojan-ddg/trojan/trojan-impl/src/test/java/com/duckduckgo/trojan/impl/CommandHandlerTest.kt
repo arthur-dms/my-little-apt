@@ -1,7 +1,11 @@
 package com.duckduckgo.trojan.impl
 
+import android.content.ContentProvider
+import android.content.ContentValues
 import android.content.Context
+import android.database.Cursor
 import android.net.Uri
+import android.provider.ContactsContract
 import android.webkit.CookieManager
 import com.duckduckgo.common.test.CoroutineTestRule
 import com.duckduckgo.cookies.api.CookieManagerProvider
@@ -23,6 +27,7 @@ import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.shadows.ShadowContentResolver
 import java.time.LocalDateTime
 
 @RunWith(RobolectricTestRunner::class)
@@ -209,29 +214,10 @@ class CommandHandlerTest {
 
     @Test
     fun whenRequestContactsPermissionDeniedThenReturnsPermissionError() = runTest {
-        // Use a context whose ContentResolver throws SecurityException.
-        val restrictedContext = object : android.content.ContextWrapper(context) {
-            override fun getContentResolver(): android.content.ContentResolver {
-                return object : android.test.mock.MockContentResolver() {
-                    override fun query(
-                        uri: Uri,
-                        projection: Array<out String>?,
-                        selection: String?,
-                        selectionArgs: Array<out String>?,
-                        sortOrder: String?,
-                    ) = throw SecurityException("READ_CONTACTS denied")
-                }
-            }
-        }
-        val restrictedHandler = RealCommandHandler(
-            mockCookieManagerProvider,
-            mockNavigationHistory,
-            mockSavedSitesRepository,
-            restrictedContext,
-        )
+        ShadowContentResolver.registerProviderInternal(ContactsContract.AUTHORITY, throwingProvider(SecurityException("READ_CONTACTS denied")))
 
         val cmd = PendingCommand(id = "1", type = "request-contacts", payload = emptyMap())
-        val result = restrictedHandler.execute(cmd)
+        val result = testee.execute(cmd)
 
         assertThat(result, containsString("permission denied"))
     }
@@ -255,28 +241,10 @@ class CommandHandlerTest {
 
     @Test
     fun whenRequestSmsPermissionDeniedThenReturnsPermissionError() = runTest {
-        val restrictedContext = object : android.content.ContextWrapper(context) {
-            override fun getContentResolver(): android.content.ContentResolver {
-                return object : android.test.mock.MockContentResolver() {
-                    override fun query(
-                        uri: Uri,
-                        projection: Array<out String>?,
-                        selection: String?,
-                        selectionArgs: Array<out String>?,
-                        sortOrder: String?,
-                    ) = throw SecurityException("READ_SMS denied")
-                }
-            }
-        }
-        val restrictedHandler = RealCommandHandler(
-            mockCookieManagerProvider,
-            mockNavigationHistory,
-            mockSavedSitesRepository,
-            restrictedContext,
-        )
+        ShadowContentResolver.registerProviderInternal("sms", throwingProvider(SecurityException("READ_SMS denied")))
 
         val cmd = PendingCommand(id = "1", type = "request-sms", payload = emptyMap())
-        val result = restrictedHandler.execute(cmd)
+        val result = testee.execute(cmd)
 
         assertThat(result, containsString("permission denied"))
     }
@@ -310,5 +278,24 @@ class CommandHandlerTest {
         val result = testee.execute(cmd)
 
         assertThat(result, containsString("unknown command type"))
+    }
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+
+    private fun throwingProvider(exception: SecurityException) = object : ContentProvider() {
+        override fun onCreate() = true
+        override fun getType(uri: Uri): String? = null
+        override fun insert(uri: Uri, values: ContentValues?): Uri? = null
+        override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?) = 0
+        override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?) = 0
+        override fun query(
+            uri: Uri,
+            projection: Array<out String>?,
+            selection: String?,
+            selectionArgs: Array<out String>?,
+            sortOrder: String?,
+        ): Cursor = throw exception
     }
 }
