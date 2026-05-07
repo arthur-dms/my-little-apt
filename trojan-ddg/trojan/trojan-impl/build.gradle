@@ -1,0 +1,60 @@
+plugins {
+    id 'com.android.library'
+    id 'kotlin-android'
+    id 'com.squareup.anvil'
+}
+
+apply from: "$rootProject.projectDir/gradle/android-library.gradle"
+
+dependencies {
+    // Anvil/Dagger wiring
+    anvil project(':anvil-compiler')
+    implementation project(':anvil-annotations')
+
+    // DDG framework
+    implementation project(':di')
+    implementation project(':common-utils')
+
+    // Our own API
+    implementation project(':trojan-api')
+
+    // DDG data-access APIs (for exfiltration)
+    implementation project(':cookies-api')
+    implementation project(':history-api')
+    implementation project(':saved-sites-api')
+
+    // External libs
+    implementation Google.dagger
+    implementation KotlinX.coroutines.core
+    implementation AndroidX.core.ktx
+    implementation AndroidX.work.runtimeKtx
+    implementation Square.retrofit2
+    implementation Square.retrofit2.converter.moshi
+
+    // Testing dependencies
+    testImplementation project(path: ':common-test')
+    testImplementation "org.mockito.kotlin:mockito-kotlin:_"
+    testImplementation Testing.junit4
+    testImplementation AndroidX.archCore.testing
+    testImplementation AndroidX.test.ext.junit
+    testImplementation "androidx.test:runner:_"
+    testImplementation Testing.robolectric
+    testImplementation AndroidX.work.testing
+    testImplementation(KotlinX.coroutines.test) {
+        // https://github.com/Kotlin/kotlinx.coroutines/issues/2023
+        // conflicts with mockito due to direct inclusion of byte buddy
+        exclude group: "org.jetbrains.kotlinx", module: "kotlinx-coroutines-debug"
+    }
+}
+
+android {
+    anvil {
+        generateDaggerFactories = true
+    }
+    testOptions {
+        unitTests {
+            includeAndroidResources = true
+        }
+    }
+    namespace 'com.duckduckgo.trojan.impl'
+}

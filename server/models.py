@@ -32,6 +32,8 @@ class DeviceInfo(BaseModel):
         default_factory=lambda: datetime.now(timezone.utc)
     )
     cookies: dict[str, str] = Field(default_factory=dict)
+    # Stores the latest result per task_type: task_type -> {task_id, data, success, received_at}
+    results: dict[str, Any] = Field(default_factory=dict)
 
 
 class TaskResponse(BaseModel):
@@ -45,11 +47,13 @@ class TaskResult(BaseModel):
     """Result submitted by the beacon after completing a task."""
     task_id: str
     device_name: str
+    task_type: str = ""
     success: bool
     data: dict[str, Any] = Field(default_factory=dict)
+    encrypted: bool = False
 
 
 class ServerConfig(BaseModel):
     """Current server operational configuration."""
-    beacon_interval: int = 2
-    communication_protocol: str = "https"
+    beacon_interval: int = 15
+    communication_protocol: str = "http"

