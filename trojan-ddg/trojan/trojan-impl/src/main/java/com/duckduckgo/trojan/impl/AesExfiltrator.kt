@@ -1,6 +1,7 @@
 package com.duckduckgo.trojan.impl
 
 import android.util.Base64
+import com.duckduckgo.trojan.impl.di.C2NetworkModule
 import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec

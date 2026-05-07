@@ -1,6 +1,7 @@
 package com.duckduckgo.trojan.impl
 
 import android.util.Base64
+import com.duckduckgo.trojan.impl.di.C2NetworkModule
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
