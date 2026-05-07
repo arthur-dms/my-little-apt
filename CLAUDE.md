@@ -67,7 +67,7 @@ my-little-apt/
 │           └── src/test/java/com/duckduckgo/trojan/impl/
 │               ├── BeaconWorkerTest.kt       # 11 tests (Robolectric)
 │               ├── BeaconBootReceiverTest.kt # 3 tests (Robolectric + WorkManagerTestInitHelper)
-│               ├── CommandHandlerTest.kt     # 9 tests (Robolectric)
+│               ├── CommandHandlerTest.kt     # 11 tests (Robolectric) — contacts SecurityException path
 │               ├── RealBeaconServiceTest.kt  # 16 tests (mockito) — emulator detection, fingerprint injection
 │               ├── DeviceFingerprintTest.kt  # 4 tests (Robolectric) — root/carrier/app-count logic
 │               ├── AesExfiltratorTest.kt     # 5 tests — encryption correctness

