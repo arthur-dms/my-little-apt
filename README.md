@@ -273,7 +273,7 @@ pip install -r requirements.txt -r requirements-dev.txt
 python -m pytest tests/ -v
 ```
 
-### Android Client Tests (36 tests)
+### Android Client Tests (56 tests)
 
 ```bash
 cd trojan-ddg
