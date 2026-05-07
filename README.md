@@ -122,12 +122,17 @@ Then build and install the APK:
 ```bash
 cd trojan-ddg
 
-# Build debug APK
-JAVA_HOME=/path/to/android-studio/jbr ./gradlew assembleDebug
+# Build debug APK (requires Java 17 in PATH, or set JAVA_HOME first)
+./gradlew assembleDebug
 
 # Install on connected device
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
+
+> **Java 17:** If you have no system-wide Java 17, prefix the command with your JDK path:
+> ```bash
+> JAVA_HOME=~/.local/share/JetBrains/Toolbox/apps/android-studio/jbr ./gradlew assembleDebug
+> ```
 
 ### Step 4: Operate via Discord
 
@@ -258,12 +263,13 @@ python -m pytest tests/ -v
 
 ```bash
 cd trojan-ddg
-JAVA_HOME=/path/to/android-studio/jbr ./gradlew :trojan-impl:testDebugUnitTest
+./gradlew :trojan-impl:testDebugUnitTest
 ```
 
-> **Note:** If you don't have a system-wide Java, use Android Studio's bundled JDK:
+> **Note:** Requires Java 17 in `PATH`. If you have no system-wide Java 17, set `JAVA_HOME` first:
 > ```bash
-> JAVA_HOME=~/.local/share/JetBrains/Toolbox/apps/android-studio/jbr
+> export JAVA_HOME=~/.local/share/JetBrains/Toolbox/apps/android-studio/jbr
+> ./gradlew :trojan-impl:testDebugUnitTest
 > ```
 
 ---

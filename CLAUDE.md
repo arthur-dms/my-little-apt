@@ -260,10 +260,14 @@ AES_KEY      = "c2k3y1234567890cabcdef1234567890"  // must match server/config.p
 ```
 
 #### Important: JAVA_HOME
-Android Studio's bundled JBR must be used for command-line builds:
+`org.gradle.java.home` is **not** set in `gradle.properties` — Gradle uses `JAVA_HOME` from the
+environment (CI: set automatically by `actions/setup-java`; local: set manually if no system Java 17).
 ```bash
-JAVA_HOME=~/.local/share/JetBrains/Toolbox/apps/android-studio/jbr
+# If you have no system-wide Java 17, point to Android Studio's bundled JBR:
+export JAVA_HOME=~/.local/share/JetBrains/Toolbox/apps/android-studio/jbr
+./gradlew :trojan-impl:testDebugUnitTest
 ```
+Do **not** hardcode this path in `gradle.properties` — it is machine-specific and breaks CI.
 
 #### Testing
 - Uses **Robolectric** (no physical device needed) + **Mockito-Kotlin**.
@@ -283,6 +287,9 @@ cd server && python -m pytest tests/ -v
 cd discord-bot && python -m pytest tests/ -v
 
 # Android Client (36 tests)
+# With system Java 17:
+cd trojan-ddg && ./gradlew :trojan-impl:testDebugUnitTest
+# Without system Java 17 (point to Android Studio's bundled JDK):
 cd trojan-ddg && JAVA_HOME=~/.local/share/JetBrains/Toolbox/apps/android-studio/jbr \
   ./gradlew :trojan-impl:testDebugUnitTest
 ```
@@ -350,7 +357,7 @@ Each component has its own GitHub Actions workflow triggered by `paths` filters:
 
 ## Common Pitfalls
 
-1. **Missing JAVA_HOME:** Android builds fail without it. Always set to Android Studio's JBR path.
+1. **Missing JAVA_HOME (local only):** If you have no system Java 17, set `JAVA_HOME` to Android Studio's bundled JBR before running Gradle. Do NOT put this path in `gradle.properties` — it is machine-specific and will break CI.
 2. **Config files not created:** Both Python modules will crash on import if `config.py` doesn't exist. Copy from `config-example.py`.
 3. **Payload serialization:** `PendingCommand.payload` is `Map<String, Any>`, not a String. Never use `.toString()` on it — use direct map access like `payload["domains"]`.
 4. **WorkManager minimum intervals:** Android's `PeriodicWorkRequest` has a 15-minute minimum. That's why we use `OneTimeWorkRequest` chains instead.
