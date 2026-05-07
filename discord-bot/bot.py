@@ -152,12 +152,19 @@ def format_server_results(data: dict[str, Any]) -> str:
     lines = [f"📊 **{data.get('message', 'Task Results')}**"]
     for device_name, device_results in results.items():
         lines.append(f"\n📱 **{device_name}**")
-        for task_type, result in device_results.items():
+        for task_type, history in device_results.items():
             emoji = task_emojis.get(task_type, "📄")
-            status_icon = "✅" if result.get("success") else "❌"
-            received = result.get("received_at", "")[:19].replace("T", " ")
-            lines.append(f"  {emoji} `{task_type}` — {status_icon} `{received}`")
-            output = str(result.get("data", {}).get("output", ""))
+            # history is a list (newest first); show latest + count
+            if not history:
+                continue
+            latest = history[0]
+            status_icon = "✅" if latest.get("success") else "❌"
+            received = latest.get("received_at", "")[:19].replace("T", " ")
+            count_label = f" *(+{len(history) - 1} older)*" if len(history) > 1 else ""
+            lines.append(
+                f"  {emoji} `{task_type}` — {status_icon} `{received}`{count_label}"
+            )
+            output = str(latest.get("data", {}).get("output", ""))
             if output:
                 for line in output.split("\n")[:5]:
                     lines.append(f"    > {line[:120]}")

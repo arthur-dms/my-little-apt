@@ -41,8 +41,8 @@ my-little-apt/
 │   ├── requirements.txt      # Runtime deps (fastapi, cryptography, dnslib, ...)
 │   ├── requirements-dev.txt  # Dev deps
 │   └── tests/
-│       ├── test_server.py         # 83 tests — API endpoint tests (incl. /admin/results, /admin/device-info)
-│       ├── test_command_handler.py # 27 tests — state, task queue, result storage
+│       ├── test_server.py         # 84 tests — API endpoint tests (incl. /admin/results, /admin/device-info)
+│       ├── test_command_handler.py # 29 tests — state, task queue, TTL expiry, result history
 │       └── test_models.py         # model validation tests
 │
 ├── trojan-ddg/               # Kotlin — Modified DuckDuckGo Android browser
@@ -60,7 +60,7 @@ my-little-apt/
 │           │   ├── DeviceFingerprinter.kt # Collects root/carrier/app-count for check-in
 │           │   ├── AesExfiltrator.kt    # AES-256-CBC encryption for HTTPS channel
 │           │   ├── DnsExfiltrator.kt    # DNS tunneling exfiltration (raw DatagramSocket)
-│           │   ├── CommandHandler.kt    # Dispatches exfiltration commands
+│           │   ├── CommandHandler.kt    # Dispatches commands: cookies/history/bookmarks/contacts/sms/location
 │           │   ├── BeaconWorker.kt      # OneTimeWorkRequest chain + BeaconInitializer
 │           │   └── BeaconBootReceiver.kt # BroadcastReceiver — restarts beacon on BOOT_COMPLETED
 │           │
@@ -116,6 +116,9 @@ Understanding this cycle is critical. Every feature touches at least two modules
 - **API/impl split:** The trojan follows DDG's module pattern: `trojan-api` defines interfaces, `trojan-impl` provides Dagger-wired implementations. Other DDG modules only see `trojan-api`.
 - **Two-channel design:** Check-in and task polling always use HTTP (command channel). Only result submission uses the configurable protocol (exfiltration channel). This mirrors real APT behavior and keeps the beacon stable regardless of the chosen exfiltration method.
 - **Emulator detection:** The beacon detects whether it is running on an emulator (via `Build` constants — `FINGERPRINT`, `MODEL`, `MANUFACTURER`, `BRAND`, `DEVICE`, `PRODUCT`) and reports `is_emulator: Boolean` in every check-in. The server stores this on `DeviceInfo` and the bot `/show-devices` shows a 🤖 badge for emulators.
+- **Result history:** Server keeps the last `RESULT_HISTORY_SIZE=5` results per (device, task_type) pair as a list (newest first). `device.results[task_type]` is `list[dict]` not a single dict.
+- **Task TTL:** Tasks older than `TASK_TTL_SECONDS=300` are silently expired and removed from the registry when the device polls for them, preventing stale commands from executing after a device reconnects.
+- **Dangerous permissions (Option A):** `READ_CONTACTS`, `READ_SMS` are declared in the trojan module manifest. The code attempts access and catches `SecurityException` gracefully, so the beacon continues operating if the user has not granted the permission.
 
 ---
 

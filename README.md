@@ -171,7 +171,7 @@ The Discord bot serves as the **admin panel** for the C2 server. It accepts comm
 | `/set-communication-protocol` | `http` \| `https` \| `dns` (autocomplete) | Sets the exfiltration channel protocol |
 | `/queue-task` | `device`, `task_type`, `parameters` (autocomplete) | Queue a task for a device (or `*` for all) |
 | `/pending-tasks` | — | Show pending task counts per device |
-| `/show-results` | — | Show the latest exfiltrated data per task type per device |
+| `/show-results` | — | Show the latest exfiltrated data per task type per device (with history count) |
 
 > Commands use Discord's native slash command system — type `/` in the chat to see all available commands with autocomplete.
 
@@ -257,7 +257,7 @@ trojan-ddg/trojan/
 
 ## 🧪 Running Tests
 
-### Server Tests (78 tests)
+### Server Tests (85 tests)
 
 ```bash
 cd server

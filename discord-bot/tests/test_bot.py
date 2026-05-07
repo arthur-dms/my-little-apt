@@ -573,12 +573,14 @@ class TestFormatServerResults:
             "data": {
                 "results_by_device": {
                     device: {
-                        task_type: {
-                            "task_id": "abc-123",
-                            "data": {"output": "google.com: session=xyz"},
-                            "success": True,
-                            "received_at": "2025-01-15T10:30:45Z",
-                        }
+                        task_type: [
+                            {
+                                "task_id": "abc-123",
+                                "data": {"output": "google.com: session=xyz"},
+                                "success": True,
+                                "received_at": "2025-01-15T10:30:45Z",
+                            }
+                        ]
                     }
                 }
             },
@@ -621,12 +623,14 @@ class TestFormatServerResults:
             "data": {
                 "results_by_device": {
                     "device": {
-                        "request-history": {
-                            "task_id": "x",
-                            "data": {"output": big_output},
-                            "success": True,
-                            "received_at": "2025-01-15T10:00:00Z",
-                        }
+                        "request-history": [
+                            {
+                                "task_id": "x",
+                                "data": {"output": big_output},
+                                "success": True,
+                                "received_at": "2025-01-15T10:00:00Z",
+                            }
+                        ]
                     }
                 }
             },
@@ -659,12 +663,14 @@ class TestShowResults:
             "data": {
                 "results_by_device": {
                     "POCO_F5": {
-                        "request-cookies": {
-                            "task_id": "t-1",
-                            "data": {"output": "google.com: s=abc"},
-                            "success": True,
-                            "received_at": "2025-01-15T10:00:00Z",
-                        }
+                        "request-cookies": [
+                            {
+                                "task_id": "t-1",
+                                "data": {"output": "google.com: s=abc"},
+                                "success": True,
+                                "received_at": "2025-01-15T10:00:00Z",
+                            }
+                        ]
                     }
                 }
             },

@@ -575,7 +575,8 @@ class TestAdminResults:
         results = data["data"]["results_by_device"]
         assert "device-alpha" in results
         assert "request-history" in results["device-alpha"]
-        assert results["device-alpha"]["request-history"]["success"] is True
+        # results now returns a history list (newest first)
+        assert results["device-alpha"]["request-history"][0]["success"] is True
 
     @pytest.mark.asyncio
     async def test_only_devices_with_results_are_listed(

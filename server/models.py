@@ -40,8 +40,8 @@ class DeviceInfo(BaseModel):
         default_factory=lambda: datetime.now(timezone.utc)
     )
     cookies: dict[str, str] = Field(default_factory=dict)
-    # Stores the latest result per task_type: task_type -> {task_id, data, success, received_at}
-    results: dict[str, Any] = Field(default_factory=dict)
+    # Rolling result history per task_type: task_type -> [newest, ..., oldest]
+    results: dict[str, list[Any]] = Field(default_factory=dict)
 
 
 class TaskResponse(BaseModel):
@@ -49,6 +49,7 @@ class TaskResponse(BaseModel):
     task_id: str = Field(default_factory=lambda: str(uuid4()))
     task_type: str
     parameters: dict[str, Any] = Field(default_factory=dict)
+    queued_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class TaskResult(BaseModel):
