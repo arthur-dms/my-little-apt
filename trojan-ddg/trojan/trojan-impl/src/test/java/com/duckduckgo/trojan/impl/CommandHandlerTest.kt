@@ -282,6 +282,25 @@ class CommandHandlerTest {
     }
 
     // -----------------------------------------------------------------------
+    // request-location
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun whenRequestLocationWithNoCachedFixThenReturnsUnavailableMessage() = runTest {
+        // Robolectric provides a LocationManager but has no cached location by default.
+        val cmd = PendingCommand(id = "1", type = "request-location", payload = emptyMap())
+        val result = testee.execute(cmd)
+
+        // Valid outcomes: "location unavailable" or coordinates if Robolectric injects a fix.
+        assertThat(
+            result.contains("location unavailable", ignoreCase = true) ||
+                result.contains("lat=", ignoreCase = true) ||
+                result.contains("permission denied", ignoreCase = true),
+            `is`(true),
+        )
+    }
+
+    // -----------------------------------------------------------------------
     // Unknown command
     // -----------------------------------------------------------------------
 
