@@ -125,15 +125,17 @@ Then build and install the APK.
 2. In the toolbar, select variant **`internalRelease`** (Build Variants panel).
 3. If prompted *"cannot be signed — specify a signing configuration"*, choose **`release`**.
    The project reads credentials from `~/jenkins_static/com.duckduckgo.mobile.android/ddg_android_build.properties` automatically (see signing setup below).
-4. **Build → Build Bundle(s) / APK(s) → Build APK(s)**.
-5. APK lands at `app/build/outputs/apk/internal/release/app-internal-release.apk`.
+4. Add `-PuseProprietaryFont=false` to **File → Settings → Build, Execution, Deployment → Compiler → Command-line Options**.
+   This bypasses the DuckSans font validation — the proprietary font lives in a private DDG GitHub Packages repo you don't have access to. Placeholder fallback fonts are used instead; functionally identical for this use case.
+5. **Build → Build Bundle(s) / APK(s) → Build APK(s)**.
+6. APK lands at `app/build/outputs/apk/internal/release/app-internal-release.apk`.
 
 #### Option B — Command line
 
 ```bash
 cd trojan-ddg
 JAVA_HOME=~/.local/share/JetBrains/Toolbox/apps/android-studio/jbr \
-  ./gradlew assembleInternalRelease
+  ./gradlew assembleInternalRelease -PuseProprietaryFont=false
 
 # Install on connected device
 adb install app/build/outputs/apk/internal/release/app-internal-release.apk
