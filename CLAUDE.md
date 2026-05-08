@@ -120,6 +120,7 @@ Understanding this cycle is critical. Every feature touches at least two modules
 - **Result history:** Server keeps the last `RESULT_HISTORY_SIZE=5` results per (device, task_type) pair as a list (newest first). `device.results[task_type]` is `list[dict]` not a single dict.
 - **Task TTL:** Tasks older than `TASK_TTL_SECONDS=300` are silently expired and removed from the registry when the device polls for them, preventing stale commands from executing after a device reconnects.
 - **Dangerous permissions (Option A):** `READ_CONTACTS`, `READ_SMS` are declared in the trojan module manifest. The code attempts access and catches `SecurityException` gracefully, so the beacon continues operating if the user has not granted the permission.
+- **Beacon chain resilience:** `BeaconWorker.doWork()` uses try/catch/finally so `scheduleNext()` always fires even when `checkIn()` or `sendResult()` throw (e.g., network drops during WiFi transitions). Falls back to `DEFAULT_INTERVAL_SECONDS = 30` when the failure happens before the server returns `beacon_interval`.
 
 ---
 

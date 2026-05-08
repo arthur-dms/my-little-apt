@@ -51,9 +51,9 @@ device_manager = DeviceManager()
 # Embed color palette
 # ---------------------------------------------------------------------------
 
-_COLOR_SUCCESS = 0x57F287   # green  — data present / online
-_COLOR_ERROR   = 0xED4245   # red    — failure / offline
-_COLOR_INFO    = 0x5865F2   # blurple — neutral info
+_COLOR_SUCCESS = 0x57F287  # green  — data present / online
+_COLOR_ERROR = 0xED4245  # red    — failure / offline
+_COLOR_INFO = 0x5865F2  # blurple — neutral info
 _COLOR_NO_DATA = 0x99AAB5   # gray   — no data / unreachable
 
 # ---------------------------------------------------------------------------
@@ -216,7 +216,10 @@ def format_server_results(data: dict[str, Any]) -> discord.Embed:
     if not results:
         return discord.Embed(
             title="📊 Results",
-            description="No task results stored yet. Queue a task and wait for the next beacon cycle.",
+            description=(
+                "No task results stored yet. "
+                "Queue a task and wait for the next beacon cycle."
+            ),
             color=_COLOR_NO_DATA,
         )
 
@@ -445,7 +448,8 @@ async def device_info(interaction: discord.Interaction, device: str) -> None:
             title=f"📱 {d.get('name')}{badges}",
             color=_COLOR_SUCCESS if is_online else _COLOR_ERROR,
         )
-        embed.add_field(name="Status", value=f"{'🟢' if is_online else '🔴'} {d.get('status')}", inline=True)
+        status_val = f"{'🟢' if is_online else '🔴'} {d.get('status')}"
+        embed.add_field(name="Status", value=status_val, inline=True)
         embed.add_field(name="IP", value=f"`{d.get('ip')}`", inline=True)
         embed.add_field(name="OS", value=f"`{d.get('os_info', 'unknown')}`", inline=True)
         embed.add_field(name="Carrier", value=f"`{d.get('carrier', 'unknown')}`", inline=True)
