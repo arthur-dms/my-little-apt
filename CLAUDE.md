@@ -26,7 +26,7 @@ my-little-apt/
 │   ├── requirements.txt      # Runtime deps (discord.py, httpx)
 │   ├── requirements-dev.txt  # Dev deps (pytest, pytest-asyncio, mypy, bandit)
 │   └── tests/
-│       ├── test_bot.py       # 56 tests — slash commands, access control, autocomplete, results
+│       ├── test_bot.py       # 125 tests — slash commands, access control, autocomplete, results
 │       ├── test_config.py    # 14 tests — config constant validation
 │       └── test_devices.py   # 46 tests — DeviceManager logic (standalone mode)
 │
@@ -72,7 +72,7 @@ my-little-apt/
 │               ├── DeviceFingerprintTest.kt  # 4 tests (Robolectric) — root/carrier/app-count logic
 │               ├── AesExfiltratorTest.kt     # 5 tests — encryption correctness
 │               └── DnsExfiltratorTest.kt     # 5 tests — chunking and QNAME format
-│               # Total: 56 tests
+│               # Total: 58 tests
 │
 ├── .github/workflows/        # CI/CD pipelines (trigger on main, feat/**, fix/**)
 ├── README.md                 # User-facing deployment guide
@@ -302,10 +302,10 @@ Do **not** hardcode this path in `gradle.properties` — it is machine-specific 
 # Server (78 tests)
 cd server && python -m pytest tests/ -v
 
-# Discord Bot (121 tests)
+# Discord Bot (125 tests)
 cd discord-bot && python -m pytest tests/ -v
 
-# Android Client (56 tests)
+# Android Client (58 tests)
 # With system Java 17:
 cd trojan-ddg && ./gradlew :trojan-impl:testDebugUnitTest
 # Without system Java 17 (point to Android Studio's bundled JDK):

@@ -267,7 +267,7 @@ pip install -r requirements.txt -r requirements-dev.txt
 python -m pytest tests/ -v
 ```
 
-### Discord Bot Tests (121 tests)
+### Discord Bot Tests (125 tests)
 
 ```bash
 cd discord-bot
@@ -275,7 +275,7 @@ pip install -r requirements.txt -r requirements-dev.txt
 python -m pytest tests/ -v
 ```
 
-### Android Client Tests (56 tests)
+### Android Client Tests (58 tests)
 
 ```bash
 cd trojan-ddg
