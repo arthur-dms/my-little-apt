@@ -29,7 +29,6 @@ from bot import (  # noqa: E402
     format_server_simple,
     format_server_results,
     format_cached_for_task,
-    format_queue_confirmation,
     beacon_interval_autocomplete,
     protocol_autocomplete,
 )
@@ -60,22 +59,79 @@ def _make_interaction(
     """Create a mocked discord.Interaction for slash commands."""
     interaction = MagicMock(spec=discord.Interaction)
 
-    # User
     interaction.user = MagicMock(spec=discord.Member)
     interaction.user.id = author_id
     interaction.user.__str__ = lambda self: "TestUser#1234"
 
-    # Guild & Channel
     interaction.guild = MagicMock()
     interaction.guild.name = "test-guild"
     interaction.channel = MagicMock()
     interaction.channel.name = "test-channel"
 
-    # Response
     interaction.response = MagicMock()
     interaction.response.send_message = AsyncMock()
 
     return interaction
+
+
+def _get_sent_text(interaction: MagicMock) -> str:
+    """
+    Extract searchable text from whatever was sent to the channel.
+    Handles both plain-text send_message calls and embed-based calls.
+    """
+    call_args = interaction.response.send_message.call_args
+    if call_args is None:
+        return ""
+
+    # Check keyword args for an embed
+    embed: discord.Embed | None = call_args.kwargs.get("embed")
+    if embed is not None:
+        parts: list[str] = []
+        if embed.title:
+            parts.append(embed.title)
+        if embed.description:
+            parts.append(embed.description)
+        for field in embed.fields:
+            parts.append(field.name)
+            parts.append(field.value)
+        if embed.footer and embed.footer.text:
+            parts.append(embed.footer.text)
+        return " ".join(parts)
+
+    # Fall back to first positional argument (plain text)
+    if call_args.args:
+        return str(call_args.args[0])
+    return ""
+
+
+def _make_request_mock(task_type: str, with_cached_data: bool = False):
+    """Return an async side_effect for call_server simulating a /request-* flow."""
+    results_data = {
+        "status": "success",
+        "data": {
+            "results_by_device": {
+                "POCO_F5": {
+                    task_type: [
+                        {
+                            "data": {"output": f"cached output for {task_type}"},
+                            "success": True,
+                            "received_at": "2025-01-15T10:00:00Z",
+                        }
+                    ]
+                }
+            } if with_cached_data else {}
+        },
+    }
+    queue_data = {"status": "success", "message": f"Task '{task_type}' queued for 1 device(s)"}
+
+    async def side_effect(path, **kwargs):
+        if path == "/admin/results":
+            return results_data
+        if path == "/admin/queue-task":
+            return queue_data
+        return None
+
+    return side_effect
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +163,6 @@ class TestLogging:
 
     def test_log_command_does_not_raise(self) -> None:
         interaction = _make_interaction()
-        # Should not raise any exception
         log_command(interaction, "test-command", "arg=value")
 
     def test_log_command_without_args(self) -> None:
@@ -133,20 +188,9 @@ class TestCallServer:
 
     @pytest.mark.asyncio
     async def test_returns_none_on_connection_error(self) -> None:
-        # call_server to a port that doesn't exist
-        import bot as b
-        original_url = b.C2_SERVER_URL
-        try:
-            # Patch at module level
-            b.C2_SERVER_URL = "http://localhost:19999"
-            # Re-import won't help, use the patched module
-            from bot import call_server as cs
-            # Actually we need to mock this differently
-            with patch("bot.C2_SERVER_URL", "http://localhost:19999"):
-                result = await call_server("/health")
-            assert result is None
-        finally:
-            b.C2_SERVER_URL = original_url
+        with patch("bot.C2_SERVER_URL", "http://localhost:19999"):
+            result = await call_server("/health")
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_returns_none_on_http_error(self) -> None:
@@ -164,13 +208,13 @@ class TestCallServer:
 
 
 # ---------------------------------------------------------------------------
-# Format helpers tests
+# Embed formatter tests
 # ---------------------------------------------------------------------------
 
 class TestFormatHelpers:
     """Tests for the server response formatting functions."""
 
-    def test_format_server_devices_with_devices(self) -> None:
+    def test_format_server_devices_returns_embed(self) -> None:
         data = {
             "status": "success",
             "message": "Found 2 device(s)",
@@ -182,28 +226,54 @@ class TestFormatHelpers:
             },
         }
         result = format_server_devices(data)
-        assert "dev-a" in result
-        assert "dev-b" in result
-        assert "🟢" in result
-        assert "🔴" in result
+        assert isinstance(result, discord.Embed)
+        field_text = " ".join(f.name + f.value for f in result.fields)
+        assert "dev-a" in field_text
+        assert "dev-b" in field_text
+        assert "🟢" in field_text
+        assert "🔴" in field_text
 
     def test_format_server_devices_empty(self) -> None:
+        data = {"status": "success", "message": "No devices", "data": {"devices": []}}
+        result = format_server_devices(data)
+        assert isinstance(result, discord.Embed)
+        assert "No devices" in (result.description or "")
+
+    def test_format_server_devices_shows_last_seen(self) -> None:
         data = {
-            "status": "success",
-            "message": "No devices",
-            "data": {"devices": []},
+            "data": {
+                "devices": [
+                    {"name": "dev-a", "ip": "1.1.1.1", "status": "online",
+                     "last_seen": "2025-01-15T10:30:00Z"},
+                ]
+            }
         }
         result = format_server_devices(data)
-        assert "No devices" in result
+        field_text = " ".join(f.value for f in result.fields)
+        assert "2025-01-15" in field_text
+
+    def test_format_server_simple_success_returns_embed(self) -> None:
+        data = {"status": "success", "message": "Interval set to 30"}
+        result = format_server_simple(data)
+        assert isinstance(result, discord.Embed)
+        assert "30" in (result.description or "")
+        assert result.color.value == 0x57F287  # type: ignore[union-attr]
+
+    def test_format_server_simple_error_returns_embed(self) -> None:
+        data = {"status": "error", "message": "Invalid value"}
+        result = format_server_simple(data)
+        assert isinstance(result, discord.Embed)
+        assert result.color.value == 0xED4245  # type: ignore[union-attr]
 
     def test_format_cached_for_task_no_data(self) -> None:
         result = format_cached_for_task(None, "request-cookies")
-        assert "unreachable" in result
+        assert isinstance(result, discord.Embed)
+        assert "unreachable" in (result.description or "").lower()
 
     def test_format_cached_for_task_empty_results(self) -> None:
         data = {"status": "success", "data": {"results_by_device": {}}}
         result = format_cached_for_task(data, "request-cookies")
-        assert "No cached data" in result
+        assert "No cached data" in (result.description or "")
 
     def test_format_cached_for_task_shows_output(self) -> None:
         data = {
@@ -211,15 +281,17 @@ class TestFormatHelpers:
                 "results_by_device": {
                     "POCO_F5": {
                         "request-cookies": [
-                            {"data": {"output": "google.com: s=abc"}, "success": True, "received_at": "2025-01-15T10:00:00Z"}
+                            {"data": {"output": "google.com: s=abc"}, "success": True,
+                             "received_at": "2025-01-15T10:00:00Z"}
                         ]
                     }
                 }
             }
         }
         result = format_cached_for_task(data, "request-cookies")
-        assert "POCO_F5" in result
-        assert "google.com" in result
+        field_text = " ".join(f.name + f.value for f in result.fields)
+        assert "POCO_F5" in field_text
+        assert "google.com" in field_text
 
     def test_format_cached_for_task_filters_by_device(self) -> None:
         data = {
@@ -227,70 +299,46 @@ class TestFormatHelpers:
                 "results_by_device": {
                     "POCO_F5": {
                         "request-history": [
-                            {"data": {"output": "example.com"}, "success": True, "received_at": "2025-01-15T10:00:00Z"}
+                            {"data": {"output": "example.com"}, "success": True,
+                             "received_at": "2025-01-15T10:00:00Z"}
                         ]
                     },
                     "OTHER": {
                         "request-history": [
-                            {"data": {"output": "other.com"}, "success": True, "received_at": "2025-01-15T10:00:00Z"}
+                            {"data": {"output": "other.com"}, "success": True,
+                             "received_at": "2025-01-15T10:00:00Z"}
                         ]
                     },
                 }
             }
         }
         result = format_cached_for_task(data, "request-history", device_filter="POCO_F5")
-        assert "POCO_F5" in result
-        assert "OTHER" not in result
-
-    def test_format_queue_confirmation_success(self) -> None:
-        resp = {"status": "success", "message": "queued"}
-        result = format_queue_confirmation(resp, "request-cookies", "*")
-        assert "queued" in result.lower()
-        assert "all devices" in result
-
-    def test_format_queue_confirmation_server_unreachable(self) -> None:
-        result = format_queue_confirmation(None, "request-history", "*")
-        assert "unreachable" in result.lower()
-
-    def test_format_queue_confirmation_specific_device(self) -> None:
-        resp = {"status": "success", "message": "queued"}
-        result = format_queue_confirmation(resp, "request-sms", "POCO_F5")
-        assert "POCO_F5" in result
-
-    def test_format_server_simple_success(self) -> None:
-        data = {"status": "success", "message": "Interval set to 16"}
-        result = format_server_simple(data)
-        assert "✅" in result
-        assert "16" in result
-
-    def test_format_server_simple_error(self) -> None:
-        data = {"status": "error", "message": "Invalid value"}
-        result = format_server_simple(data)
-        assert "❌" in result
+        field_text = " ".join(f.name + f.value for f in result.fields)
+        assert "POCO_F5" in field_text
+        assert "OTHER" not in field_text
 
 
 # ---------------------------------------------------------------------------
-# Slash command tests — admin user (standalone fallback)
+# Slash command tests
 # ---------------------------------------------------------------------------
 
 class TestShowDevicesCommand:
     """Tests for the /show-devices slash command."""
 
     @pytest.mark.asyncio
-    async def test_admin_gets_response(self) -> None:
+    async def test_admin_gets_embed_response(self) -> None:
         interaction = _make_interaction()
         with patch("bot.call_server", return_value=None):
             await show_devices(interaction)
         interaction.response.send_message.assert_called_once()
-        sent_text = interaction.response.send_message.call_args[0][0]
-        assert "Managed Devices" in sent_text
+        embed = interaction.response.send_message.call_args.kwargs.get("embed")
+        assert embed is not None
 
     @pytest.mark.asyncio
     async def test_non_admin_gets_denied(self) -> None:
         interaction = _make_interaction(author_id=999)
         await show_devices(interaction)
-        interaction.response.send_message.assert_called_once()
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "Access denied" in sent_text
 
     @pytest.mark.asyncio
@@ -307,8 +355,24 @@ class TestShowDevicesCommand:
         }
         with patch("bot.call_server", return_value=server_data):
             await show_devices(interaction)
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "srv-dev" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_embed_shows_last_seen(self) -> None:
+        interaction = _make_interaction()
+        server_data = {
+            "data": {
+                "devices": [
+                    {"name": "dev", "ip": "1.1.1.1", "status": "online",
+                     "last_seen": "2025-01-15T10:30:00Z"},
+                ]
+            }
+        }
+        with patch("bot.call_server", return_value=server_data):
+            await show_devices(interaction)
+        sent_text = _get_sent_text(interaction)
+        assert "2025-01-15" in sent_text
 
 
 class TestSetBeaconIntervalCommand:
@@ -319,7 +383,7 @@ class TestSetBeaconIntervalCommand:
         interaction = _make_interaction()
         with patch("bot.call_server", return_value=None):
             await set_beacon_interval(interaction, 30)
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "✅" in sent_text
         assert "30" in sent_text
 
@@ -328,45 +392,15 @@ class TestSetBeaconIntervalCommand:
         interaction = _make_interaction()
         with patch("bot.call_server", return_value=None):
             await set_beacon_interval(interaction, 99)
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "❌" in sent_text
 
     @pytest.mark.asyncio
     async def test_non_admin_gets_denied(self) -> None:
         interaction = _make_interaction(author_id=999)
         await set_beacon_interval(interaction, 30)
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "Access denied" in sent_text
-
-
-def _make_request_mock(task_type: str, with_cached_data: bool = False):
-    """Return an async side_effect for call_server that simulates /request-* flow."""
-    results_data = {
-        "status": "success",
-        "data": {
-            "results_by_device": {
-                "POCO_F5": {
-                    task_type: [
-                        {
-                            "data": {"output": f"cached output for {task_type}"},
-                            "success": True,
-                            "received_at": "2025-01-15T10:00:00Z",
-                        }
-                    ]
-                }
-            } if with_cached_data else {}
-        },
-    }
-    queue_data = {"status": "success", "message": f"Task '{task_type}' queued for 1 device(s)"}
-
-    async def side_effect(path, **kwargs):
-        if path == "/admin/results":
-            return results_data
-        if path == "/admin/queue-task":
-            return queue_data
-        return None
-
-    return side_effect
 
 
 class TestRequestCookiesCommand:
@@ -376,7 +410,7 @@ class TestRequestCookiesCommand:
     async def test_non_admin_gets_denied(self) -> None:
         interaction = _make_interaction(author_id=999)
         await request_cookies(interaction)
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "Access denied" in sent_text
 
     @pytest.mark.asyncio
@@ -384,7 +418,7 @@ class TestRequestCookiesCommand:
         interaction = _make_interaction()
         with patch("bot.call_server", side_effect=_make_request_mock("request-cookies", with_cached_data=True)):
             await request_cookies(interaction)
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "cached output for request-cookies" in sent_text
         assert "📡" in sent_text
 
@@ -393,7 +427,7 @@ class TestRequestCookiesCommand:
         interaction = _make_interaction()
         with patch("bot.call_server", side_effect=_make_request_mock("request-cookies")):
             await request_cookies(interaction)
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "No cached data" in sent_text
         assert "📡" in sent_text
 
@@ -402,15 +436,15 @@ class TestRequestCookiesCommand:
         interaction = _make_interaction()
         with patch("bot.call_server", return_value=None):
             await request_cookies(interaction)
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "unreachable" in sent_text.lower()
 
     @pytest.mark.asyncio
-    async def test_specific_device_included_in_confirmation(self) -> None:
+    async def test_specific_device_included_in_footer(self) -> None:
         interaction = _make_interaction()
         with patch("bot.call_server", side_effect=_make_request_mock("request-cookies")):
             await request_cookies(interaction, device="POCO_F5")
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "POCO_F5" in sent_text
 
 
@@ -422,7 +456,7 @@ class TestSetCommunicationProtocolCommand:
         interaction = _make_interaction()
         with patch("bot.call_server", return_value=None):
             await set_communication_protocol(interaction, "dns")
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "✅" in sent_text
         assert "dns" in sent_text
 
@@ -431,14 +465,14 @@ class TestSetCommunicationProtocolCommand:
         interaction = _make_interaction()
         with patch("bot.call_server", return_value=None):
             await set_communication_protocol(interaction, "ftp")
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "❌" in sent_text
 
     @pytest.mark.asyncio
     async def test_non_admin_gets_denied(self) -> None:
         interaction = _make_interaction(author_id=999)
         await set_communication_protocol(interaction, "dns")
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "Access denied" in sent_text
 
 
@@ -449,7 +483,7 @@ class TestRequestHistoryCommand:
     async def test_non_admin_gets_denied(self) -> None:
         interaction = _make_interaction(author_id=999)
         await request_history(interaction)
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "Access denied" in sent_text
 
     @pytest.mark.asyncio
@@ -457,7 +491,7 @@ class TestRequestHistoryCommand:
         interaction = _make_interaction()
         with patch("bot.call_server", side_effect=_make_request_mock("request-history", with_cached_data=True)):
             await request_history(interaction)
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "cached output for request-history" in sent_text
         assert "📡" in sent_text
 
@@ -466,15 +500,15 @@ class TestRequestHistoryCommand:
         interaction = _make_interaction()
         with patch("bot.call_server", return_value=None):
             await request_history(interaction)
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "unreachable" in sent_text.lower()
 
     @pytest.mark.asyncio
-    async def test_specific_device_in_confirmation(self) -> None:
+    async def test_specific_device_in_footer(self) -> None:
         interaction = _make_interaction()
         with patch("bot.call_server", side_effect=_make_request_mock("request-history")):
             await request_history(interaction, device="POCO_F5")
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "POCO_F5" in sent_text
 
 
@@ -485,7 +519,7 @@ class TestRequestBookmarksCommand:
     async def test_non_admin_gets_denied(self) -> None:
         interaction = _make_interaction(author_id=999)
         await request_bookmarks(interaction)
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "Access denied" in sent_text
 
     @pytest.mark.asyncio
@@ -493,7 +527,7 @@ class TestRequestBookmarksCommand:
         interaction = _make_interaction()
         with patch("bot.call_server", side_effect=_make_request_mock("request-bookmarks", with_cached_data=True)):
             await request_bookmarks(interaction)
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "cached output for request-bookmarks" in sent_text
         assert "📡" in sent_text
 
@@ -502,15 +536,15 @@ class TestRequestBookmarksCommand:
         interaction = _make_interaction()
         with patch("bot.call_server", return_value=None):
             await request_bookmarks(interaction)
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "unreachable" in sent_text.lower()
 
     @pytest.mark.asyncio
-    async def test_specific_device_in_confirmation(self) -> None:
+    async def test_specific_device_in_footer(self) -> None:
         interaction = _make_interaction()
         with patch("bot.call_server", side_effect=_make_request_mock("request-bookmarks")):
             await request_bookmarks(interaction, device="POCO_F5")
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "POCO_F5" in sent_text
 
 
@@ -521,7 +555,7 @@ class TestRequestSmsCommand:
     async def test_non_admin_gets_denied(self) -> None:
         interaction = _make_interaction(author_id=999)
         await request_sms(interaction)
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "Access denied" in sent_text
 
     @pytest.mark.asyncio
@@ -529,7 +563,7 @@ class TestRequestSmsCommand:
         interaction = _make_interaction()
         with patch("bot.call_server", side_effect=_make_request_mock("request-sms", with_cached_data=True)):
             await request_sms(interaction)
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "cached output for request-sms" in sent_text
         assert "📡" in sent_text
 
@@ -538,7 +572,7 @@ class TestRequestSmsCommand:
         interaction = _make_interaction()
         with patch("bot.call_server", return_value=None):
             await request_sms(interaction)
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "unreachable" in sent_text.lower()
 
 
@@ -549,7 +583,7 @@ class TestRequestLocationCommand:
     async def test_non_admin_gets_denied(self) -> None:
         interaction = _make_interaction(author_id=999)
         await request_location(interaction)
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "Access denied" in sent_text
 
     @pytest.mark.asyncio
@@ -557,7 +591,7 @@ class TestRequestLocationCommand:
         interaction = _make_interaction()
         with patch("bot.call_server", side_effect=_make_request_mock("request-location", with_cached_data=True)):
             await request_location(interaction)
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "cached output for request-location" in sent_text
         assert "📡" in sent_text
 
@@ -566,7 +600,7 @@ class TestRequestLocationCommand:
         interaction = _make_interaction()
         with patch("bot.call_server", return_value=None):
             await request_location(interaction)
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "unreachable" in sent_text.lower()
 
 
@@ -577,7 +611,7 @@ class TestRequestContactsCommand:
     async def test_non_admin_gets_denied(self) -> None:
         interaction = _make_interaction(author_id=999)
         await request_contacts(interaction)
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "Access denied" in sent_text
 
     @pytest.mark.asyncio
@@ -585,7 +619,7 @@ class TestRequestContactsCommand:
         interaction = _make_interaction()
         with patch("bot.call_server", side_effect=_make_request_mock("request-contacts", with_cached_data=True)):
             await request_contacts(interaction)
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "cached output for request-contacts" in sent_text
         assert "📡" in sent_text
 
@@ -594,7 +628,7 @@ class TestRequestContactsCommand:
         interaction = _make_interaction()
         with patch("bot.call_server", return_value=None):
             await request_contacts(interaction)
-        sent_text = interaction.response.send_message.call_args[0][0]
+        sent_text = _get_sent_text(interaction)
         assert "unreachable" in sent_text.lower()
 
 
@@ -657,7 +691,6 @@ class TestProtocolAutocomplete:
     async def test_case_insensitive_filter(self) -> None:
         interaction = _make_interaction()
         choices = await protocol_autocomplete(interaction, "DNS")
-        # 'DNS'.lower() = 'dns', should match 'dns'
         values = [c.value for c in choices]
         assert "dns" in values
 
@@ -689,57 +722,36 @@ class TestFormatServerResults:
             },
         }
 
-    def test_no_results_returns_empty_message(self) -> None:
+    def test_no_results_returns_embed_with_empty_message(self) -> None:
         data = {"status": "success", "message": "0 result(s)", "data": {"results_by_device": {}}}
         result = format_server_results(data)
-        assert "No task results" in result
+        assert isinstance(result, discord.Embed)
+        assert "No task results" in (result.description or "")
 
     def test_contains_device_name(self) -> None:
         result = format_server_results(self._make_results_response("POCO_F5"))
-        assert "POCO_F5" in result
+        field_text = " ".join(f.name for f in result.fields)
+        assert "POCO_F5" in field_text
 
     def test_contains_task_type(self) -> None:
         result = format_server_results(self._make_results_response())
-        assert "request-cookies" in result
+        field_text = " ".join(f.value for f in result.fields)
+        assert "request-cookies" in field_text
 
     def test_contains_success_emoji(self) -> None:
         result = format_server_results(self._make_results_response())
-        assert "✅" in result
+        field_text = " ".join(f.value for f in result.fields)
+        assert "✅" in field_text
 
     def test_contains_cookie_emoji_for_cookies(self) -> None:
         result = format_server_results(self._make_results_response(task_type="request-cookies"))
-        assert "🍪" in result
+        field_text = " ".join(f.value for f in result.fields)
+        assert "🍪" in field_text
 
     def test_contains_history_emoji_for_history(self) -> None:
         result = format_server_results(self._make_results_response(task_type="request-history"))
-        assert "📜" in result
-
-    def test_contains_output_data(self) -> None:
-        result = format_server_results(self._make_results_response())
-        assert "google.com" in result
-
-    def test_truncates_long_response(self) -> None:
-        big_output = "\n".join([f"line {i}" for i in range(200)])
-        data = {
-            "status": "success",
-            "message": "1 result(s) across 1 device(s)",
-            "data": {
-                "results_by_device": {
-                    "device": {
-                        "request-history": [
-                            {
-                                "task_id": "x",
-                                "data": {"output": big_output},
-                                "success": True,
-                                "received_at": "2025-01-15T10:00:00Z",
-                            }
-                        ]
-                    }
-                }
-            },
-        }
-        result = format_server_results(data)
-        assert len(result) <= 2000
+        field_text = " ".join(f.value for f in result.fields)
+        assert "📜" in field_text
 
 
 # ---------------------------------------------------------------------------
@@ -753,12 +765,11 @@ class TestShowResults:
     async def test_access_denied_for_non_admin(self) -> None:
         interaction = _make_interaction(author_id=999)
         await show_results(interaction)
-        interaction.response.send_message.assert_called_once()
-        args = interaction.response.send_message.call_args
-        assert "Access denied" in args[0][0]
+        sent_text = _get_sent_text(interaction)
+        assert "Access denied" in sent_text
 
     @pytest.mark.asyncio
-    async def test_server_response_formatted(self) -> None:
+    async def test_server_response_formatted_as_embed(self) -> None:
         interaction = _make_interaction()
         server_data = {
             "status": "success",
@@ -781,10 +792,12 @@ class TestShowResults:
         with patch("bot.call_server", new_callable=AsyncMock) as mock_server:
             mock_server.return_value = server_data
             await show_results(interaction)
-        interaction.response.send_message.assert_called_once()
-        response_text = interaction.response.send_message.call_args[0][0]
-        assert "POCO_F5" in response_text
-        assert "request-cookies" in response_text
+        embed = interaction.response.send_message.call_args.kwargs.get("embed")
+        assert embed is not None
+        assert isinstance(embed, discord.Embed)
+        sent_text = _get_sent_text(interaction)
+        assert "POCO_F5" in sent_text
+        assert "request-cookies" in sent_text
 
     @pytest.mark.asyncio
     async def test_server_unreachable_shows_error(self) -> None:
@@ -792,8 +805,8 @@ class TestShowResults:
         with patch("bot.call_server", new_callable=AsyncMock) as mock_server:
             mock_server.return_value = None
             await show_results(interaction)
-        response_text = interaction.response.send_message.call_args[0][0]
-        assert "❌" in response_text
+        sent_text = _get_sent_text(interaction)
+        assert "❌" in sent_text
 
     @pytest.mark.asyncio
     async def test_no_results_shows_empty_message(self) -> None:
@@ -806,5 +819,5 @@ class TestShowResults:
         with patch("bot.call_server", new_callable=AsyncMock) as mock_server:
             mock_server.return_value = empty_data
             await show_results(interaction)
-        response_text = interaction.response.send_message.call_args[0][0]
-        assert "No task results" in response_text
+        sent_text = _get_sent_text(interaction)
+        assert "No task results" in sent_text

