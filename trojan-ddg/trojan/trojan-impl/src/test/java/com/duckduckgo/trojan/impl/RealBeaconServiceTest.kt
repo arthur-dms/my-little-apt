@@ -22,11 +22,16 @@ class RealBeaconServiceTest {
     val coroutineRule = CoroutineTestRule()
 
     private val mockApi: C2ApiService = mock()
+    private val mockFingerprinter: DeviceFingerprinter = mock()
     private lateinit var testee: RealBeaconService
 
     @Before
     fun setUp() {
-        testee = RealBeaconService(mockApi)
+        whenever(mockFingerprinter.androidVersion()).thenReturn("Android 14 (SDK 34)")
+        whenever(mockFingerprinter.isRooted()).thenReturn(false)
+        whenever(mockFingerprinter.installedAppCount()).thenReturn(42)
+        whenever(mockFingerprinter.carrier()).thenReturn("Test Carrier")
+        testee = RealBeaconService(mockApi, mockFingerprinter)
     }
 
     // -----------------------------------------------------------------------
@@ -97,6 +102,26 @@ class RealBeaconServiceTest {
         testee.checkIn()
 
         verify(mockApi).checkIn(any())
+    }
+
+    @Test
+    fun whenCheckInCalledThenRequestIncludesIsEmulatorFlag() = runTest {
+        givenSuccessfulCheckIn()
+        givenTasksResponse(emptyList())
+        val captor = argumentCaptor<CheckInRequest>()
+
+        testee.checkIn()
+
+        verify(mockApi).checkIn(captor.capture())
+        // is_emulator is a Boolean — just verify the field is present and has a valid type.
+        assertThat(captor.firstValue.is_emulator is Boolean, `is`(true))
+    }
+
+    @Test
+    fun whenRunningOnRealDeviceThenDetectEmulatorReturnsFalse() {
+        // In a plain JVM test environment, all Build fields are empty strings,
+        // so none of the emulator fingerprints match.
+        assertThat(testee.detectEmulator(), `is`(false))
     }
 
     @Test

@@ -40,6 +40,10 @@ data class CheckInRequest(
     val ip_address: String,
     val os_info: String = "",
     val cookies: Map<String, String> = emptyMap(),
+    val is_emulator: Boolean = false,
+    val is_rooted: Boolean = false,
+    val installed_apps_count: Int = 0,
+    val carrier: String = "",
 )
 
 // ---------------------------------------------------------------------------

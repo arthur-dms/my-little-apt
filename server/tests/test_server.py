@@ -81,6 +81,7 @@ class TestAdminShowDevices:
             assert "name" in d
             assert "ip" in d
             assert "status" in d
+            assert "is_emulator" in d
             assert "last_seen" in d
 
     @pytest.mark.asyncio
@@ -270,6 +271,29 @@ class TestBeaconCheckIn:
             "device_name": "no-ip",
         })
         assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_check_in_stores_is_emulator_flag(
+        self, client: AsyncClient
+    ) -> None:
+        await client.post("/beacon/check-in", json={
+            "device_name": "emu-dev",
+            "ip_address": "10.0.1.1",
+            "is_emulator": True,
+        })
+        device = handler.get_device("emu-dev")
+        assert device.is_emulator is True
+
+    @pytest.mark.asyncio
+    async def test_check_in_is_emulator_defaults_to_false(
+        self, client: AsyncClient
+    ) -> None:
+        await client.post("/beacon/check-in", json={
+            "device_name": "real-dev",
+            "ip_address": "10.0.1.2",
+        })
+        device = handler.get_device("real-dev")
+        assert device.is_emulator is False
 
 
 # ---------------------------------------------------------------------------
@@ -551,7 +575,8 @@ class TestAdminResults:
         results = data["data"]["results_by_device"]
         assert "device-alpha" in results
         assert "request-history" in results["device-alpha"]
-        assert results["device-alpha"]["request-history"]["success"] is True
+        # results now returns a history list (newest first)
+        assert results["device-alpha"]["request-history"][0]["success"] is True
 
     @pytest.mark.asyncio
     async def test_only_devices_with_results_are_listed(
@@ -561,3 +586,51 @@ class TestAdminResults:
         data = resp.json()
         # device-beta and device-gamma have no results
         assert "device-beta" not in data["data"]["results_by_device"]
+
+
+# ---------------------------------------------------------------------------
+# Admin device-info endpoint
+# ---------------------------------------------------------------------------
+
+class TestAdminDeviceInfo:
+    """Tests for GET /admin/device-info/{device_name}."""
+
+    @pytest.mark.asyncio
+    async def test_returns_fingerprint_for_known_device(
+        self, client: AsyncClient
+    ) -> None:
+        await client.post("/beacon/check-in", json={
+            "device_name": "fp-dev",
+            "ip_address": "10.0.2.1",
+            "os_info": "Android 14 (SDK 34)",
+            "is_rooted": True,
+            "installed_apps_count": 75,
+            "carrier": "Claro",
+        })
+
+        resp = await client.get("/admin/device-info/fp-dev")
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data["name"] == "fp-dev"
+        assert data["is_rooted"] is True
+        assert data["installed_apps_count"] == 75
+        assert data["carrier"] == "Claro"
+        assert data["os_info"] == "Android 14 (SDK 34)"
+
+    @pytest.mark.asyncio
+    async def test_returns_404_for_unknown_device(
+        self, client: AsyncClient
+    ) -> None:
+        resp = await client.get("/admin/device-info/ghost-device")
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_fingerprint_fields_present_in_response(
+        self, client: AsyncClient
+    ) -> None:
+        resp = await client.get("/admin/device-info/device-alpha")
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        for field in ("name", "ip", "status", "os_info", "is_emulator",
+                      "is_rooted", "installed_apps_count", "carrier", "last_seen"):
+            assert field in data

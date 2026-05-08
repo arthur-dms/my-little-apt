@@ -41,8 +41,8 @@ my-little-apt/
 │   ├── requirements.txt      # Runtime deps (fastapi, cryptography, dnslib, ...)
 │   ├── requirements-dev.txt  # Dev deps
 │   └── tests/
-│       ├── test_server.py         # 78 tests — API endpoint tests (incl. /admin/results)
-│       ├── test_command_handler.py # 27 tests — state, task queue, result storage
+│       ├── test_server.py         # 84 tests — API endpoint tests (incl. /admin/results, /admin/device-info)
+│       ├── test_command_handler.py # 29 tests — state, task queue, TTL expiry, result history
 │       └── test_models.py         # model validation tests
 │
 ├── trojan-ddg/               # Kotlin — Modified DuckDuckGo Android browser
@@ -57,17 +57,22 @@ my-little-apt/
 │           │   ├── C2ApiService.kt      # Retrofit interface matching server endpoints
 │           │   ├── C2NetworkModule.kt   # @Named("c2") OkHttp + Retrofit + shared constants
 │           │   ├── RealBeaconService.kt # check-in + poll + protocol-aware sendResult
+│           │   ├── DeviceFingerprinter.kt # Collects root/carrier/app-count for check-in
 │           │   ├── AesExfiltrator.kt    # AES-256-CBC encryption for HTTPS channel
 │           │   ├── DnsExfiltrator.kt    # DNS tunneling exfiltration (raw DatagramSocket)
-│           │   ├── CommandHandler.kt    # Dispatches request-cookies/history/bookmarks
-│           │   └── BeaconWorker.kt      # OneTimeWorkRequest chain + BeaconInitializer
+│           │   ├── CommandHandler.kt    # Dispatches commands: cookies/history/bookmarks/contacts/sms/location
+│           │   ├── BeaconWorker.kt      # OneTimeWorkRequest chain + BeaconInitializer
+│           │   └── BeaconBootReceiver.kt # BroadcastReceiver — restarts beacon on BOOT_COMPLETED
 │           │
 │           └── src/test/java/com/duckduckgo/trojan/impl/
 │               ├── BeaconWorkerTest.kt       # 11 tests (Robolectric)
-│               ├── CommandHandlerTest.kt     # 9 tests (Robolectric)
-│               ├── RealBeaconServiceTest.kt  # 14 tests (mockito)
+│               ├── BeaconBootReceiverTest.kt # 3 tests (Robolectric + WorkManagerTestInitHelper)
+│               ├── CommandHandlerTest.kt     # 14 tests (Robolectric) — contacts/SMS/location paths
+│               ├── RealBeaconServiceTest.kt  # 16 tests (Mockito) — emulator detection, fingerprint injection
+│               ├── DeviceFingerprintTest.kt  # 4 tests (Robolectric) — root/carrier/app-count logic
 │               ├── AesExfiltratorTest.kt     # 5 tests — encryption correctness
 │               └── DnsExfiltratorTest.kt     # 5 tests — chunking and QNAME format
+│               # Total: 56 tests
 │
 ├── .github/workflows/        # CI/CD pipelines (trigger on main, feat/**, fix/**)
 ├── README.md                 # User-facing deployment guide
@@ -111,6 +116,10 @@ Understanding this cycle is critical. Every feature touches at least two modules
 - **Isolated networking:** The trojan's OkHttp/Retrofit stack is `@Named("c2")` — completely separated from DDG's own networking to prevent traffic leaks.
 - **API/impl split:** The trojan follows DDG's module pattern: `trojan-api` defines interfaces, `trojan-impl` provides Dagger-wired implementations. Other DDG modules only see `trojan-api`.
 - **Two-channel design:** Check-in and task polling always use HTTP (command channel). Only result submission uses the configurable protocol (exfiltration channel). This mirrors real APT behavior and keeps the beacon stable regardless of the chosen exfiltration method.
+- **Emulator detection:** The beacon detects whether it is running on an emulator (via `Build` constants — `FINGERPRINT`, `MODEL`, `MANUFACTURER`, `BRAND`, `DEVICE`, `PRODUCT`) and reports `is_emulator: Boolean` in every check-in. The server stores this on `DeviceInfo` and the bot `/show-devices` shows a 🤖 badge for emulators.
+- **Result history:** Server keeps the last `RESULT_HISTORY_SIZE=5` results per (device, task_type) pair as a list (newest first). `device.results[task_type]` is `list[dict]` not a single dict.
+- **Task TTL:** Tasks older than `TASK_TTL_SECONDS=300` are silently expired and removed from the registry when the device polls for them, preventing stale commands from executing after a device reconnects.
+- **Dangerous permissions (Option A):** `READ_CONTACTS`, `READ_SMS` are declared in the trojan module manifest. The code attempts access and catches `SecurityException` gracefully, so the beacon continues operating if the user has not granted the permission.
 
 ---
 
@@ -286,7 +295,7 @@ cd server && python -m pytest tests/ -v
 # Discord Bot (121 tests)
 cd discord-bot && python -m pytest tests/ -v
 
-# Android Client (36 tests)
+# Android Client (56 tests)
 # With system Java 17:
 cd trojan-ddg && ./gradlew :trojan-impl:testDebugUnitTest
 # Without system Java 17 (point to Android Studio's bundled JDK):
@@ -369,3 +378,5 @@ Each component has its own GitHub Actions workflow triggered by `paths` filters:
 10. **Protocol is exfiltration-only:** `communication_protocol` controls only `sendResult()`. Check-in and task polling always use HTTP regardless of the configured protocol.
 11. **Trojan CI — no submodules:** `trojan-ci.yml` uses `submodules: false`. The DDG upstream has a native C++ submodule (`bloom_cpp`) with no URL in `.gitmodules`. Recursive submodule checkout fails; since `:trojan-impl:testDebugUnitTest` is JVM-only, submodules are not needed.
 12. **AES library — use `cryptography`, not `pyCryptodome`:** `server/crypto.py` uses `pyca/cryptography` (package `cryptography`). Bandit B413 flags the `pyCryptodome` import path (`from Crypto.Cipher import AES`) even though pyCryptodome is maintained. Use `cryptography` to keep CI clean.
+13. **Robolectric 4.16+ — `Build.*` fields are null:** In Robolectric 4.16.1+, `android.os.Build` constants (`FINGERPRINT`, `MODEL`, `MANUFACTURER`, etc.) return `null` instead of empty strings. Any code that calls `.startsWith()` or `.contains()` on them directly will throw NPE. Always use `.orEmpty()` before calling string methods: `Build.FINGERPRINT.orEmpty().startsWith("generic")`.
+14. **Testing ContentProvider permission denial with Robolectric:** Do NOT use `android.test.mock.MockContentResolver` in Robolectric unit tests — the class is not on the compile classpath and its `query()` method is `final` (inherited from `ContentResolver`). Instead, register a throwing `ContentProvider` via `ShadowContentResolver.registerProviderInternal(authority, provider)` where the provider's `query()` throws `SecurityException`. The authority for contacts is `ContactsContract.AUTHORITY`; for SMS it is `"sms"`.

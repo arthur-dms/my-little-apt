@@ -11,6 +11,9 @@ from uuid import uuid4
 
 from models import DeviceInfo, ServerConfig, TaskResponse
 
+RESULT_HISTORY_SIZE = 5
+TASK_TTL_SECONDS = 300
+
 logger = logging.getLogger("c2-server.handler")
 
 
@@ -98,11 +101,27 @@ class CommandHandler:
         return tasks
 
     def dequeue_tasks(self, device_name: str) -> list[TaskResponse]:
-        """Retrieve and remove all pending tasks for a device (fire-once)."""
-        tasks = self.task_queues.pop(device_name, [])
-        if tasks:
-            logger.info("Dequeued %d task(s) for %s", len(tasks), device_name)
-        return tasks
+        """Retrieve and remove all pending tasks for a device (fire-once).
+
+        Tasks older than TASK_TTL_SECONDS are silently expired and removed
+        from the registry so they never reach the client.
+        """
+        all_tasks = self.task_queues.pop(device_name, [])
+        now = datetime.now(timezone.utc)
+        valid: list[TaskResponse] = []
+        expired_count = 0
+        for task in all_tasks:
+            age = (now - task.queued_at).total_seconds()
+            if age <= TASK_TTL_SECONDS:
+                valid.append(task)
+            else:
+                self.task_registry.pop(task.task_id, None)
+                expired_count += 1
+        if expired_count:
+            logger.info("Expired %d stale task(s) for %s", expired_count, device_name)
+        if valid:
+            logger.info("Dequeued %d task(s) for %s", len(valid), device_name)
+        return valid
 
     def pending_task_count(self, device_name: str) -> int:
         """Return the number of pending tasks for a device."""
@@ -130,12 +149,16 @@ class CommandHandler:
             return
 
         task_type = self.task_registry.pop(task_id, "unknown")
-        device.results[task_type] = {
+        entry = {
             "task_id": task_id,
             "data": data,
             "success": success,
             "received_at": datetime.now(timezone.utc).isoformat(),
         }
+        history = device.results.setdefault(task_type, [])
+        history.insert(0, entry)  # newest first
+        if len(history) > RESULT_HISTORY_SIZE:
+            history.pop()
         logger.info(
             "Result stored: device=%s task_type=%s task_id=%s",
             device_name,

