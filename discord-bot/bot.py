@@ -639,6 +639,58 @@ async def request_location(
 
 
 @bot.tree.command(
+    name="send-message",
+    description="Push a visible notification to a device (or all devices).",
+)
+@app_commands.describe(
+    message="Text the user will see in their notification tray",
+    device="Target device name (or '*' for all devices)",
+)
+async def send_message(
+    interaction: discord.Interaction,
+    message: str,
+    device: str = "*",
+) -> None:
+    """Queue a send-notification task so the beacon displays a message to the end user."""
+    if not is_admin_user(interaction):
+        log_access_denied(interaction, "send-message")
+        await interaction.response.send_message(
+            "🚫 **Access denied.** You are not authorised to use this bot.",
+            ephemeral=True,
+        )
+        return
+    log_command(interaction, "send-message", f"device={device} message={message!r}")
+
+    response = await call_server(
+        "/admin/queue-task",
+        method="POST",
+        json_body={
+            "device_name": device,
+            "task_type": "send-notification",
+            "parameters": {"message": message},
+        },
+    )
+
+    if response:
+        embed = discord.Embed(
+            title="✉️ Message queued",
+            description=f"**{message}**",
+            color=_COLOR_SUCCESS,
+        )
+        embed.add_field(name="Target", value=f"`{device}`", inline=True)
+        queued = response.get("queued_for", [])
+        embed.add_field(name="Devices", value=str(len(queued)), inline=True)
+        embed.set_footer(text="Will be delivered on the next beacon cycle.")
+    else:
+        embed = discord.Embed(
+            title="❌ Server unreachable",
+            description="Cannot queue message — server is offline.",
+            color=_COLOR_ERROR,
+        )
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(
     name="request-contacts",
     description="Show cached contacts and queue a fresh request.",
 )

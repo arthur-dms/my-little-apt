@@ -296,6 +296,30 @@ class CommandHandlerTest {
     }
 
     // -----------------------------------------------------------------------
+    // send-notification
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun whenSendNotificationThenReturnsDelivered() = runTest {
+        val cmd = PendingCommand(
+            id = "1",
+            type = "send-notification",
+            payload = mapOf("message" to "You can uninstall the app now."),
+        )
+        val result = testee.execute(cmd)
+
+        assertThat(result, containsString("notification delivered"))
+    }
+
+    @Test
+    fun whenSendNotificationWithMissingMessageThenReturnsError() = runTest {
+        val cmd = PendingCommand(id = "1", type = "send-notification", payload = emptyMap())
+        val result = testee.execute(cmd)
+
+        assertThat(result, containsString("missing message payload"))
+    }
+
+    // -----------------------------------------------------------------------
     // Unknown command
     // -----------------------------------------------------------------------
 
