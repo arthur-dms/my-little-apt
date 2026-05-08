@@ -259,7 +259,7 @@ trojan-ddg/trojan/
 
 ## 🧪 Running Tests
 
-### Server Tests (85 tests)
+### Server Tests (125 tests)
 
 ```bash
 cd server
@@ -267,7 +267,7 @@ pip install -r requirements.txt -r requirements-dev.txt
 python -m pytest tests/ -v
 ```
 
-### Discord Bot Tests (125 tests)
+### Discord Bot Tests (146 tests)
 
 ```bash
 cd discord-bot
@@ -313,7 +313,7 @@ All GitHub Actions workflows live in `.github/workflows/`. Each component has it
 | `server/server.py` | FastAPI server with admin and beacon endpoints |
 | `server/command_handler.py` | Server-side state management + per-device task queue |
 | `server/models.py` | Pydantic data models |
-| `server/tests/` | Test suite (67 tests) |
+| `server/tests/` | Test suite (85 tests) |
 | `trojan-ddg/trojan/` | C2 beacon module (trojan-api + trojan-impl) |
 | `.github/workflows/` | CI/CD pipeline definitions |
 

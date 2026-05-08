@@ -26,9 +26,9 @@ my-little-apt/
 │   ├── requirements.txt      # Runtime deps (discord.py, httpx)
 │   ├── requirements-dev.txt  # Dev deps (pytest, pytest-asyncio, mypy, bandit)
 │   └── tests/
-│       ├── test_bot.py       # 125 tests — slash commands, access control, autocomplete, results
+│       ├── test_bot.py       # 79 tests — slash commands, access control, autocomplete, results
 │       ├── test_config.py    # 14 tests — config constant validation
-│       └── test_devices.py   # 46 tests — DeviceManager logic (standalone mode)
+│       └── test_devices.py   # 53 tests — DeviceManager logic (standalone mode)
 │
 ├── server/                   # Python — FastAPI C2 server
 │   ├── server.py             # Entry point: FastAPI app + lifespan DNS startup
@@ -41,9 +41,9 @@ my-little-apt/
 │   ├── requirements.txt      # Runtime deps (fastapi, cryptography, dnslib, ...)
 │   ├── requirements-dev.txt  # Dev deps
 │   └── tests/
-│       ├── test_server.py         # 84 tests — API endpoint tests (incl. /admin/results, /admin/device-info)
+│       ├── test_server.py         # 85 tests — API endpoint tests (incl. /admin/results, /admin/device-info)
 │       ├── test_command_handler.py # 29 tests — state, task queue, TTL expiry, result history
-│       └── test_models.py         # model validation tests
+│       └── test_models.py         # 11 tests — model validation
 │
 ├── trojan-ddg/               # Kotlin — Modified DuckDuckGo Android browser
 │   └── trojan/               # C2 beacon module (follows DDG's API/impl pattern)
@@ -299,10 +299,10 @@ Do **not** hardcode this path in `gradle.properties` — it is machine-specific 
 ## How to Run Tests
 
 ```bash
-# Server (78 tests)
+# Server (125 tests across 3 files)
 cd server && python -m pytest tests/ -v
 
-# Discord Bot (125 tests)
+# Discord Bot (146 tests across 3 files)
 cd discord-bot && python -m pytest tests/ -v
 
 # Android Client (58 tests)
@@ -325,6 +325,28 @@ All 3 test suites must pass before committing.
 - **Docstrings:** All classes and public functions.
 - **Test naming:** `test_<scenario>` inside `class Test<ComponentName>`.
 - **Async:** All server endpoints and bot commands are `async`.
+
+#### Bot: access guard pattern
+Every slash command uses `_deny_if_not_admin` instead of inline checks:
+```python
+if await _deny_if_not_admin(interaction, "command-name"): return
+```
+`_deny_if_not_admin` sends the ephemeral denial and returns `True` if the caller is not the admin.
+
+#### Bot: embed formatters
+All commands return `discord.Embed`. Each response type has a named formatter (`format_server_devices`, `format_server_results`, `format_device_info`, `format_cached_for_task`, `format_server_simple`). Helper `_fmt_timestamp(iso)` trims ISO 8601 strings to `YYYY-MM-DD HH:MM`.
+
+#### Server tests: FIRST Independence
+`reset_handler` (autouse) only *clears* state. Classes that need pre-seeded devices declare a class-level autouse fixture:
+```python
+@pytest.fixture(autouse=True)
+def _seed(self, seeded_handler: None) -> None:  # noqa: PT004
+    pass
+```
+This makes the dependency explicit and eliminates `handler.devices.clear()` overrides inside individual tests.
+
+#### Bot tests: parametrized command classes
+The six `/request-*` commands are tested once via `@pytest.mark.parametrize` on `_REQUEST_COMMANDS`, a list of `(task_type, callback)` tuples. Adding a new `/request-*` command requires only a new entry in `_REQUEST_COMMANDS`.
 
 ### Kotlin (trojan client)
 - **Style:** DDG's `ktlint` configuration (see `trojan-ddg/.editorconfig`).
