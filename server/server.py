@@ -12,7 +12,13 @@ from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel
 
 from command_handler import CommandHandler
-from config import DNS_LISTENER_PORT, SERVER_HOST, SERVER_PORT, VALID_BEACON_INTERVALS, VALID_COMMUNICATION_PROTOCOLS
+from config import (
+    DNS_LISTENER_PORT,
+    SERVER_HOST,
+    SERVER_PORT,
+    VALID_BEACON_INTERVALS,
+    VALID_COMMUNICATION_PROTOCOLS,
+)
 from models import (
     BeaconCheckIn,
     DeviceInfo,

@@ -278,7 +278,8 @@ def format_device_info(data: dict[str, Any]) -> discord.Embed:
         title=f"📱 {d.get('name')}{badges}",
         color=_COLOR_SUCCESS if is_online else _COLOR_ERROR,
     )
-    embed.add_field(name="Status", value=f"{'🟢' if is_online else '🔴'} {d.get('status')}", inline=True)
+    status_icon = '🟢' if is_online else '🔴'
+    embed.add_field(name="Status", value=f"{status_icon} {d.get('status')}", inline=True)
     embed.add_field(name="IP", value=f"`{d.get('ip')}`", inline=True)
     embed.add_field(name="OS", value=f"`{d.get('os_info', 'unknown')}`", inline=True)
     embed.add_field(name="Carrier", value=f"`{d.get('carrier', 'unknown')}`", inline=True)
