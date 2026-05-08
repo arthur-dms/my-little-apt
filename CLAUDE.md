@@ -26,7 +26,7 @@ my-little-apt/
 │   ├── requirements.txt      # Runtime deps (discord.py, httpx)
 │   ├── requirements-dev.txt  # Dev deps (pytest, pytest-asyncio, mypy, bandit)
 │   └── tests/
-│       ├── test_bot.py       # 56 tests — slash commands, access control, autocomplete, results
+│       ├── test_bot.py       # 125 tests — slash commands, access control, autocomplete, results
 │       ├── test_config.py    # 14 tests — config constant validation
 │       └── test_devices.py   # 46 tests — DeviceManager logic (standalone mode)
 │
@@ -60,19 +60,19 @@ my-little-apt/
 │           │   ├── DeviceFingerprinter.kt # Collects root/carrier/app-count for check-in
 │           │   ├── AesExfiltrator.kt    # AES-256-CBC encryption for HTTPS channel
 │           │   ├── DnsExfiltrator.kt    # DNS tunneling exfiltration (raw DatagramSocket)
-│           │   ├── CommandHandler.kt    # Dispatches commands: cookies/history/bookmarks/contacts/sms/location
+│           │   ├── CommandHandler.kt    # Dispatches commands: cookies/history/bookmarks/contacts/sms/location/send-notification
 │           │   ├── BeaconWorker.kt      # OneTimeWorkRequest chain + BeaconInitializer
 │           │   └── BeaconBootReceiver.kt # BroadcastReceiver — restarts beacon on BOOT_COMPLETED
 │           │
 │           └── src/test/java/com/duckduckgo/trojan/impl/
 │               ├── BeaconWorkerTest.kt       # 11 tests (Robolectric)
 │               ├── BeaconBootReceiverTest.kt # 3 tests (Robolectric + WorkManagerTestInitHelper)
-│               ├── CommandHandlerTest.kt     # 14 tests (Robolectric) — contacts/SMS/location paths
+│               ├── CommandHandlerTest.kt     # 16 tests (Robolectric) — contacts/SMS/location/notification paths
 │               ├── RealBeaconServiceTest.kt  # 16 tests (Mockito) — emulator detection, fingerprint injection
 │               ├── DeviceFingerprintTest.kt  # 4 tests (Robolectric) — root/carrier/app-count logic
 │               ├── AesExfiltratorTest.kt     # 5 tests — encryption correctness
 │               └── DnsExfiltratorTest.kt     # 5 tests — chunking and QNAME format
-│               # Total: 56 tests
+│               # Total: 58 tests
 │
 ├── .github/workflows/        # CI/CD pipelines (trigger on main, feat/**, fix/**)
 ├── README.md                 # User-facing deployment guide
@@ -248,7 +248,7 @@ DNS_LISTENER_PORT: int = 5300  # use 53 for real DNS (requires root/setcap)
 | `RealBeaconService` | check-in + poll + protocol-aware `sendResult` dispatch (http/https/dns) |
 | `AesExfiltrator` | `object`: AES-256-CBC `encrypt(plaintext, key)` → base64(IV\|\|ciphertext) |
 | `DnsExfiltrator` | base64-chunks result into DNS A-queries via raw `DatagramSocket` to C2_DNS_PORT |
-| `CommandHandler` | Interface + `RealCommandHandler`: dispatches all 6 request-* commands; history sorted newest→oldest, title excluded |
+| `CommandHandler` | Interface + `RealCommandHandler`: dispatches all 6 request-* commands + `send-notification`; history sorted newest→oldest, title excluded |
 | `BeaconWorker` | `CoroutineWorker`: `checkIn()` → execute commands → `sendResult(..., protocol)` → scheduleNext |
 | `BeaconInitializer` | `MainProcessLifecycleObserver`: enqueues first `OneTimeWorkRequest` on app start |
 | `C2ApiService` | Retrofit interface matching server `/beacon/*` endpoints |
@@ -302,10 +302,10 @@ Do **not** hardcode this path in `gradle.properties` — it is machine-specific 
 # Server (78 tests)
 cd server && python -m pytest tests/ -v
 
-# Discord Bot (121 tests)
+# Discord Bot (125 tests)
 cd discord-bot && python -m pytest tests/ -v
 
-# Android Client (56 tests)
+# Android Client (58 tests)
 # With system Java 17:
 cd trojan-ddg && ./gradlew :trojan-impl:testDebugUnitTest
 # Without system Java 17 (point to Android Studio's bundled JDK):

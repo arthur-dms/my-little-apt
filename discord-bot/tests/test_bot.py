@@ -47,6 +47,7 @@ request_sms = bot_module.request_sms.callback  # type: ignore[union-attr]
 request_location = bot_module.request_location.callback  # type: ignore[union-attr]
 request_contacts = bot_module.request_contacts.callback  # type: ignore[union-attr]
 show_results = bot_module.show_results.callback  # type: ignore[union-attr]
+send_message = bot_module.send_message.callback  # type: ignore[union-attr]
 
 
 # ---------------------------------------------------------------------------
@@ -628,6 +629,47 @@ class TestRequestContactsCommand:
         interaction = _make_interaction()
         with patch("bot.call_server", return_value=None):
             await request_contacts(interaction)
+        sent_text = _get_sent_text(interaction)
+        assert "unreachable" in sent_text.lower()
+
+
+class TestSendMessageCommand:
+    """Tests for the /send-message slash command."""
+
+    @pytest.mark.asyncio
+    async def test_non_admin_gets_denied(self) -> None:
+        interaction = _make_interaction(author_id=999)
+        await send_message(interaction, message="hello", device="*")
+        sent_text = _get_sent_text(interaction)
+        assert "Access denied" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_message_queued_successfully(self) -> None:
+        interaction = _make_interaction()
+        mock_response = {"status": "queued", "queued_for": ["POCO_F5"]}
+        with patch("bot.call_server", new_callable=AsyncMock) as mock_server:
+            mock_server.return_value = mock_response
+            await send_message(interaction, message="You can uninstall now.", device="*")
+        sent_text = _get_sent_text(interaction)
+        assert "queued" in sent_text.lower()
+        assert "You can uninstall now." in sent_text
+
+    @pytest.mark.asyncio
+    async def test_shows_target_device_in_embed(self) -> None:
+        interaction = _make_interaction()
+        mock_response = {"status": "queued", "queued_for": ["POCO_F5"]}
+        with patch("bot.call_server", new_callable=AsyncMock) as mock_server:
+            mock_server.return_value = mock_response
+            await send_message(interaction, message="Test msg", device="POCO_F5")
+        sent_text = _get_sent_text(interaction)
+        assert "POCO_F5" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_server_unreachable_shows_error(self) -> None:
+        interaction = _make_interaction()
+        with patch("bot.call_server", new_callable=AsyncMock) as mock_server:
+            mock_server.return_value = None
+            await send_message(interaction, message="hi", device="*")
         sent_text = _get_sent_text(interaction)
         assert "unreachable" in sent_text.lower()
 

