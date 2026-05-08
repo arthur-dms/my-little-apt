@@ -137,6 +137,15 @@ Understanding this cycle is critical. Every feature touches at least two modules
 - Commands call `call_server(path, method, json_body)` to bridge to the FastAPI server.
 - If the server is unreachable, commands fall back to `DeviceManager` (standalone mode with demo data).
 
+#### Embed-based UI
+All commands send `discord.Embed` objects instead of plain text strings. Color palette:
+- `0x57F287` green — success / online
+- `0xED4245` red — error / offline
+- `0x5865F2` blurple — neutral info
+- `0x99AAB5` gray — no data / server unreachable
+
+Format functions (`format_server_devices`, `format_cached_for_task`, `format_server_results`, `format_server_simple`) all return `discord.Embed`. Standalone/fallback responses are wrapped via `_wrap_standalone(text)`.
+
 #### Command Pattern
 Every slash command follows this pattern:
 ```python
@@ -145,12 +154,12 @@ async def command_name(interaction: discord.Interaction, arg: type) -> None:
     if not is_admin_user(interaction): return denied
     log_command(interaction, "command-name")
     server_response = await call_server("/admin/endpoint", ...)
-    if server_response:
-        response = format_server_*(server_response)
-    else:
-        response = device_manager.fallback_method()
-    await interaction.response.send_message(response)
+    embed = format_server_*(server_response) if server_response else _wrap_standalone(fallback)
+    await interaction.response.send_message(embed=embed)
 ```
+
+#### Testing with embeds
+Tests use `_get_sent_text(interaction)` which extracts searchable text from either a plain-text or embed-based `send_message` call — title + description + field names/values + footer are concatenated for assertions. This keeps test assertions readable regardless of the underlying message format.
 
 #### Config Constants
 ```python
@@ -238,7 +247,7 @@ DNS_LISTENER_PORT: int = 5300  # use 53 for real DNS (requires root/setcap)
 | `RealBeaconService` | check-in + poll + protocol-aware `sendResult` dispatch (http/https/dns) |
 | `AesExfiltrator` | `object`: AES-256-CBC `encrypt(plaintext, key)` → base64(IV\|\|ciphertext) |
 | `DnsExfiltrator` | base64-chunks result into DNS A-queries via raw `DatagramSocket` to C2_DNS_PORT |
-| `CommandHandler` | Interface + `RealCommandHandler`: dispatches `request-cookies`, `request-history`, `request-bookmarks` |
+| `CommandHandler` | Interface + `RealCommandHandler`: dispatches all 6 request-* commands; history sorted newest→oldest, title excluded |
 | `BeaconWorker` | `CoroutineWorker`: `checkIn()` → execute commands → `sendResult(..., protocol)` → scheduleNext |
 | `BeaconInitializer` | `MainProcessLifecycleObserver`: enqueues first `OneTimeWorkRequest` on app start |
 | `C2ApiService` | Retrofit interface matching server `/beacon/*` endpoints |

@@ -135,7 +135,7 @@ class CommandHandlerTest {
     // -----------------------------------------------------------------------
 
     @Test
-    fun whenRequestHistoryThenReturnsFormattedEntries() = runTest {
+    fun whenRequestHistoryThenReturnsFormattedEntriesWithoutTitle() = runTest {
         val entries = listOf(
             HistoryEntry.VisitedPage(
                 url = Uri.parse("https://example.com"),
@@ -149,8 +149,35 @@ class CommandHandlerTest {
         val result = testee.execute(cmd)
 
         assertThat(result, containsString("example.com"))
-        assertThat(result, containsString("Example"))
-        assertThat(result, containsString("visits: 1"))
+        assertThat(result, containsString("1 visit(s)"))
+        // title is intentionally excluded from history output
+        assertThat(result.contains("Example"), `is`(false))
+    }
+
+    @Test
+    fun whenRequestHistoryThenSortedMostRecentFirst() = runTest {
+        val older = LocalDateTime.now().minusDays(1)
+        val newer = LocalDateTime.now()
+        val entries = listOf(
+            HistoryEntry.VisitedPage(
+                url = Uri.parse("https://old.com"),
+                title = "Old",
+                visits = listOf(older),
+            ),
+            HistoryEntry.VisitedPage(
+                url = Uri.parse("https://new.com"),
+                title = "New",
+                visits = listOf(newer),
+            ),
+        )
+        whenever(mockNavigationHistory.getHistory()).thenReturn(flowOf(entries))
+
+        val cmd = PendingCommand(id = "1", type = "request-history", payload = emptyMap())
+        val result = testee.execute(cmd)
+
+        val newIdx = result.indexOf("new.com")
+        val oldIdx = result.indexOf("old.com")
+        assertThat("newer site should appear before older site", newIdx < oldIdx, `is`(true))
     }
 
     @Test

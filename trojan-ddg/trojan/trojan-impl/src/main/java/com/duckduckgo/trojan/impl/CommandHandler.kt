@@ -103,9 +103,12 @@ class RealCommandHandler @Inject constructor(
 
         if (entries.isEmpty()) return "no history entries"
 
-        return entries.joinToString("\n") { entry ->
-            "${entry.url} | ${entry.title} | visits: ${entry.visits.size}"
-        }
+        return entries
+            .sortedByDescending { entry -> entry.visits.maxOrNull() }
+            .joinToString("\n") { entry ->
+                val last = entry.visits.maxOrNull()?.toLocalDate()?.toString() ?: "unknown"
+                "${entry.url} — ${entry.visits.size} visit(s) · last: $last"
+            }
     }
 
     /**
