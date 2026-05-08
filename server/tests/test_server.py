@@ -17,13 +17,22 @@ from server import app, handler
 
 @pytest.fixture(autouse=True)
 def reset_handler():
-    """Reset the server handler state before each test."""
+    """Clear all handler state before each test (autouse — always runs).
+
+    Tests that need pre-seeded devices must also request the `seeded_handler`
+    fixture explicitly, keeping the dependency visible in the test signature.
+    """
     handler.devices.clear()
     handler.task_queues.clear()
     handler.task_registry.clear()
-    handler._seed_sample_devices()
     handler.server_config.beacon_interval = 15
     handler.server_config.communication_protocol = "http"
+
+
+@pytest.fixture
+def seeded_handler():
+    """Populate the handler with three sample devices for tests that need them."""
+    handler._seed_sample_devices()
 
 
 @pytest.fixture
@@ -62,7 +71,11 @@ class TestHealth:
 # ---------------------------------------------------------------------------
 
 class TestAdminShowDevices:
-    """Tests for GET /admin/devices."""
+    """Tests for GET /admin/devices with pre-seeded devices."""
+
+    @pytest.fixture(autouse=True)
+    def _seed(self, seeded_handler: None) -> None:  # noqa: PT004
+        pass
 
     @pytest.mark.asyncio
     async def test_returns_device_list(self, client: AsyncClient) -> None:
@@ -84,9 +97,12 @@ class TestAdminShowDevices:
             assert "is_emulator" in d
             assert "last_seen" in d
 
+
+class TestAdminShowDevicesEmpty:
+    """Tests for GET /admin/devices with no registered devices."""
+
     @pytest.mark.asyncio
     async def test_empty_device_list(self, client: AsyncClient) -> None:
-        handler.devices.clear()
         resp = await client.get("/admin/devices")
         data = resp.json()
         assert data["data"]["devices"] == []
@@ -95,6 +111,10 @@ class TestAdminShowDevices:
 
 class TestAdminRequestCookies:
     """Tests for GET /admin/cookies."""
+
+    @pytest.fixture(autouse=True)
+    def _seed(self, seeded_handler: None) -> None:  # noqa: PT004
+        pass
 
     @pytest.mark.asyncio
     async def test_returns_cookies(self, client: AsyncClient) -> None:
@@ -213,6 +233,10 @@ class TestAdminSetProtocol:
 class TestBeaconCheckIn:
     """Tests for POST /beacon/check-in."""
 
+    @pytest.fixture(autouse=True)
+    def _seed(self, seeded_handler: None) -> None:  # noqa: PT004
+        pass
+
     @pytest.mark.asyncio
     async def test_register_new_device(self, client: AsyncClient) -> None:
         resp = await client.post("/beacon/check-in", json={
@@ -303,6 +327,10 @@ class TestBeaconCheckIn:
 class TestBeaconTasks:
     """Tests for GET /beacon/tasks/{device_name}."""
 
+    @pytest.fixture(autouse=True)
+    def _seed(self, seeded_handler: None) -> None:  # noqa: PT004
+        pass
+
     @pytest.mark.asyncio
     async def test_get_tasks_for_registered_device(
         self, client: AsyncClient
@@ -336,6 +364,10 @@ class TestBeaconTasks:
 
 class TestBeaconResult:
     """Tests for POST /beacon/result."""
+
+    @pytest.fixture(autouse=True)
+    def _seed(self, seeded_handler: None) -> None:  # noqa: PT004
+        pass
 
     @pytest.mark.asyncio
     async def test_submit_result_accepted(
@@ -408,6 +440,10 @@ class TestBeaconConfig:
 
 class TestAdminQueueTask:
     """Tests for POST /admin/queue-task."""
+
+    @pytest.fixture(autouse=True)
+    def _seed(self, seeded_handler: None) -> None:  # noqa: PT004
+        pass
 
     @pytest.mark.asyncio
     async def test_queue_task_for_device(self, client: AsyncClient) -> None:
@@ -506,6 +542,10 @@ class TestAdminQueueTask:
 class TestAdminPendingTasks:
     """Tests for GET /admin/pending-tasks."""
 
+    @pytest.fixture(autouse=True)
+    def _seed(self, seeded_handler: None) -> None:  # noqa: PT004
+        pass
+
     @pytest.mark.asyncio
     async def test_no_pending_tasks(self, client: AsyncClient) -> None:
         resp = await client.get("/admin/pending-tasks")
@@ -544,6 +584,10 @@ class TestAdminPendingTasks:
 
 class TestAdminResults:
     """Tests for GET /admin/results."""
+
+    @pytest.fixture(autouse=True)
+    def _seed(self, seeded_handler: None) -> None:  # noqa: PT004
+        pass
 
     @pytest.mark.asyncio
     async def test_no_results_returns_empty(self, client: AsyncClient) -> None:
@@ -594,6 +638,10 @@ class TestAdminResults:
 
 class TestAdminDeviceInfo:
     """Tests for GET /admin/device-info/{device_name}."""
+
+    @pytest.fixture(autouse=True)
+    def _seed(self, seeded_handler: None) -> None:  # noqa: PT004
+        pass
 
     @pytest.mark.asyncio
     async def test_returns_fingerprint_for_known_device(

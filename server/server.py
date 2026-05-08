@@ -12,7 +12,13 @@ from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel
 
 from command_handler import CommandHandler
-from config import DNS_LISTENER_PORT, SERVER_HOST, SERVER_PORT, VALID_BEACON_INTERVALS
+from config import (
+    DNS_LISTENER_PORT,
+    SERVER_HOST,
+    SERVER_PORT,
+    VALID_BEACON_INTERVALS,
+    VALID_COMMUNICATION_PROTOCOLS,
+)
 from models import (
     BeaconCheckIn,
     DeviceInfo,
@@ -208,8 +214,6 @@ async def admin_set_beacon_interval(body: SetBeaconIntervalRequest) -> dict:
 @app.post("/admin/communication-protocol", tags=["admin"])
 async def admin_set_protocol(body: SetProtocolRequest) -> dict:
     """Update the communication protocol."""
-    from config import VALID_COMMUNICATION_PROTOCOLS
-
     protocol_lower = body.protocol.lower()
     if protocol_lower not in VALID_COMMUNICATION_PROTOCOLS:
         allowed = ", ".join(VALID_COMMUNICATION_PROTOCOLS)
@@ -296,7 +300,7 @@ async def beacon_submit_result(result: TaskResult) -> dict:
             detail=f"Device '{result.device_name}' is not registered.",
         )
 
-    data = dict(result.data)
+    data = result.data.copy()  # copy so mutation below doesn't affect the model
 
     # Decrypt AES-encrypted payload if flagged.
     if result.encrypted and "output" in data:
